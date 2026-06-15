@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   listMatters, createMatter, updateMatter, deleteMatter,
   linkLakelandMatter, getLakelandStatus,
+  createOrderRequest, getMatterRequest, cancelOrderRequest,
   TX_TYPES, STATES, STAGES
 } from "./db.js";
 import Contacts from "./Contacts.jsx";
@@ -212,6 +213,8 @@ function MatterDetail({ matter, onBack, onStage, onDelete, onRefresh }) {
   const [live, setLive] = useState(null);
   const [loadingLive, setLoadingLive] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
+  const [request, setRequest] = useState(null);
+  const [showPlace, setShowPlace] = useState(false);
 
   useEffect(() => {
     let on = true;
@@ -220,8 +223,10 @@ function MatterDetail({ matter, onBack, onStage, onDelete, onRefresh }) {
       getLakelandStatus(matter.id)
         .then((s) => { if (on) { setLive(s); setLoadingLive(false); } })
         .catch(() => { if (on) setLoadingLive(false); });
+      setRequest(null);
     } else {
       setLive(null);
+      getMatterRequest(matter.id).then((r) => { if (on) setRequest(r); }).catch(() => {});
     }
     return () => { on = false; };
   }, [matter.id, matter.lakeland_file_number]);
@@ -301,10 +306,18 @@ function MatterDetail({ matter, onBack, onStage, onDelete, onRefresh }) {
               {loadingLive ? "Syncing live status…" : liveOk ? "Live from Lakeland — updates automatically as your file progresses." : liveErr(live && live.error)}
             </div>
           ) : (
-            <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <button onClick={() => setShowConnect(true)} style={{ padding: "9px 15px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>◆ Connect to Lakeland</button>
-              <span style={{ fontSize: 12, color: MUTED }}>Link this matter to its Lakeland file for live status.</span>
-            </div>
+            request && request.status === "pending" ? (
+              <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={tag("#fff7ed", "#b45309")}>● Order placed — pending Lakeland review</span>
+                <button onClick={async () => { await cancelOrderRequest(request.id); const r = await getMatterRequest(matter.id); setRequest(r); }} style={{ fontSize: 12, color: MUTED, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Cancel request</button>
+              </div>
+            ) : (
+              <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                {request && request.status === "declined" && <span style={tag("#fef2f2", "#b91c1c")}>Previous request declined</span>}
+                <button onClick={() => setShowConnect(true)} style={{ padding: "9px 15px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>◆ Connect existing file</button>
+                <button onClick={() => setShowPlace(true)} style={{ padding: "9px 15px", background: "#fff", color: NV, border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>Place title order</button>
+              </div>
+            )
           )
         ) : (
           <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 9 }}>
@@ -344,6 +357,7 @@ function MatterDetail({ matter, onBack, onStage, onDelete, onRefresh }) {
       </div>
 
       {showConnect && <ConnectModal matter={matter} onClose={() => setShowConnect(false)} onLinked={() => { setShowConnect(false); onRefresh && onRefresh(); }} />}
+      {showPlace && <PlaceOrderModal matter={matter} onClose={() => setShowPlace(false)} onPlaced={async () => { setShowPlace(false); const r = await getMatterRequest(matter.id); setRequest(r); }} />}
     </div>
   );
 }
@@ -387,6 +401,79 @@ function ConnectModal({ matter, onClose, onLinked }) {
           <input style={inp} value={zip} onChange={(e) => setZip(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="e.g. 08701" />
           {err && <div style={{ marginTop: 10, fontSize: 12.5, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 11px" }}>{err}</div>}
           <button onClick={submit} disabled={busy} style={{ width: "100%", marginTop: 16, padding: "11px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 14, cursor: busy ? "default" : "pointer" }}>{busy ? "Connecting…" : "Connect"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Place-title-order modal ---------------- */
+function PlaceOrderModal({ matter, onClose, onPlaced }) {
+  const [f, setF] = useState({
+    property_address: matter.property_address || "",
+    town: matter.town || "",
+    state: matter.state || "NJ",
+    zip: "",
+    transaction_type: matter.transaction_type || "Purchase",
+    buyer: "", seller: "", lender: "", notes: ""
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const u = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  const submit = async () => {
+    if (!f.property_address.trim()) { setErr("Property address is required."); return; }
+    setBusy(true); setErr("");
+    try {
+      await createOrderRequest(matter.firm_id, {
+        matter_id: matter.id,
+        property_address: f.property_address.trim(),
+        town: f.town.trim() || null,
+        state: f.state,
+        zip: f.zip.trim() || null,
+        transaction_type: f.transaction_type,
+        buyer: f.buyer.trim() || null,
+        seller: f.seller.trim() || null,
+        lender: f.lender.trim() || null,
+        notes: f.notes.trim() || null
+      });
+      onPlaced();
+    } catch (e) { setErr(e.message || String(e)); setBusy(false); }
+  };
+
+  const inp = { width: "100%", padding: "10px 12px", border: `1px solid ${LINE}`, borderRadius: 9, fontSize: 13.5, fontFamily: "inherit" };
+  const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#475569", margin: "12px 0 5px" };
+
+  return (
+    <div onClick={(e) => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, zIndex: 60 }}>
+      <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 480, maxHeight: "90vh", overflow: "auto", boxShadow: "0 12px 40px rgba(16,24,40,.2)" }}>
+        <div style={{ padding: "18px 22px", borderBottom: `1px solid ${LINE}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 18 }}>Place a title order</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, color: "#9ca3af", cursor: "pointer" }}>×</button>
+        </div>
+        <div style={{ padding: 22 }}>
+          <div style={{ fontSize: 12.5, color: MUTED, marginBottom: 6 }}>This sends the file to Lakeland to open. They'll review it, open the file, and your matter connects automatically.</div>
+
+          <label style={lbl}>Property address</label>
+          <input style={inp} value={f.property_address} onChange={(e) => u("property_address", e.target.value)} placeholder="123 Main St" autoFocus />
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 2 }}><label style={lbl}>Town</label><input style={inp} value={f.town} onChange={(e) => u("town", e.target.value)} /></div>
+            <div style={{ flex: 1 }}><label style={lbl}>State</label><select style={inp} value={f.state} onChange={(e) => u("state", e.target.value)}>{STATES.map((s) => <option key={s}>{s}</option>)}</select></div>
+            <div style={{ flex: 1 }}><label style={lbl}>ZIP</label><input style={inp} value={f.zip} onChange={(e) => u("zip", e.target.value)} /></div>
+          </div>
+          <label style={lbl}>Transaction type</label>
+          <select style={inp} value={f.transaction_type} onChange={(e) => u("transaction_type", e.target.value)}>{TX_TYPES.map((t) => <option key={t}>{t}</option>)}</select>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}><label style={lbl}>Buyer</label><input style={inp} value={f.buyer} onChange={(e) => u("buyer", e.target.value)} placeholder="Optional" /></div>
+            <div style={{ flex: 1 }}><label style={lbl}>Seller</label><input style={inp} value={f.seller} onChange={(e) => u("seller", e.target.value)} placeholder="Optional" /></div>
+          </div>
+          <label style={lbl}>Lender</label>
+          <input style={inp} value={f.lender} onChange={(e) => u("lender", e.target.value)} placeholder="Optional" />
+          <label style={lbl}>Notes for Lakeland</label>
+          <textarea style={{ ...inp, resize: "vertical", minHeight: 56 }} value={f.notes} onChange={(e) => u("notes", e.target.value)} placeholder="Anything they should know" />
+
+          {err && <div style={{ marginTop: 10, fontSize: 12.5, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 11px" }}>{err}</div>}
+          <button onClick={submit} disabled={busy} style={{ width: "100%", marginTop: 16, padding: "11px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 14, cursor: busy ? "default" : "pointer" }}>{busy ? "Sending…" : "Send order to Lakeland"}</button>
         </div>
       </div>
     </div>

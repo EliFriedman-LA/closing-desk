@@ -82,3 +82,21 @@ export async function getLakelandStatus(matterId) {
   if (error) throw error;
   return data;
 }
+
+/* ---------------- Title order requests (Phase 2.2) ---------------- */
+export async function createOrderRequest(firmId, payload) {
+  const { data, error } = await supabase.from("order_requests").insert({ firm_id: firmId, ...payload }).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function getMatterRequest(matterId) {
+  const { data, error } = await supabase
+    .from("order_requests").select("*").eq("matter_id", matterId)
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+export async function cancelOrderRequest(id) {
+  const { error } = await supabase.from("order_requests").update({ status: "canceled" }).eq("id", id);
+  if (error) throw error;
+}
