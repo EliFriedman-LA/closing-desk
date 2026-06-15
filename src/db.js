@@ -70,3 +70,15 @@ export async function updateFirm(id, patch) {
   if (error) throw error;
   return data;
 }
+
+/* ---------------- Lakeland live connection (Phase 2) ---------------- */
+export async function linkLakelandMatter(matterId, fileNumber, zip) {
+  const { data, error } = await supabase.rpc("link_lakeland_matter", { p_matter_id: matterId, p_file_number: fileNumber, p_zip: zip });
+  if (error) throw error;
+  return data;
+}
+export async function getLakelandStatus(matterId) {
+  const { data, error } = await supabase.rpc("lakeland_matter_status", { p_matter_id: matterId });
+  if (error) throw error;
+  return data;
+}

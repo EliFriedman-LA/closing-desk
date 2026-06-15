@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   listMatters, createMatter, updateMatter, deleteMatter,
+  linkLakelandMatter, getLakelandStatus,
   TX_TYPES, STATES, STAGES
 } from "./db.js";
 import Contacts from "./Contacts.jsx";
@@ -115,7 +116,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
 
         <main style={{ padding: "24px 26px 60px", maxWidth: 1100, width: "100%" }}>
           {selected
-            ? <MatterDetail matter={selected} onBack={() => setSelectedId(null)} onStage={onStage} onDelete={onDelete} />
+            ? <MatterDetail matter={selected} onBack={() => setSelectedId(null)} onStage={onStage} onDelete={onDelete} onRefresh={load} />
             : page === "dashboard"
               ? <Dashboard firm={firm} org={org} accent={accent} initials={initials} openCount={openCount} lakelandCount={lakelandCount} total={matters.length} recent={matters.slice(0, 5)} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} />
               : page === "contacts"
@@ -205,9 +206,29 @@ function MatterRow({ m, onOpen }) {
 }
 
 /* ---------------- Matter detail ---------------- */
-function MatterDetail({ matter, onBack, onStage, onDelete }) {
+function MatterDetail({ matter, onBack, onStage, onDelete, onRefresh }) {
   const conn = matter.title_provider === "lakeland";
-  const stage = matter.stage || 0;
+  const linked = !!matter.lakeland_file_number;
+  const [live, setLive] = useState(null);
+  const [loadingLive, setLoadingLive] = useState(false);
+  const [showConnect, setShowConnect] = useState(false);
+
+  useEffect(() => {
+    let on = true;
+    if (linked) {
+      setLoadingLive(true);
+      getLakelandStatus(matter.id)
+        .then((s) => { if (on) { setLive(s); setLoadingLive(false); } })
+        .catch(() => { if (on) setLoadingLive(false); });
+    } else {
+      setLive(null);
+    }
+    return () => { on = false; };
+  }, [matter.id, matter.lakeland_file_number]);
+
+  const liveOk = linked && live && live.ok;
+  const stage = liveOk ? live.stage : (matter.stage || 0);
+
   const details = [
     ["File #", matter.file_number],
     ["Type", matter.transaction_type],
@@ -215,6 +236,20 @@ function MatterDetail({ matter, onBack, onStage, onDelete }) {
     ["Town", matter.town],
     ["Title", conn ? "Lakeland Abstract" : (matter.title_company_name || "—")]
   ].filter((d) => d[1]);
+
+  const dateRows = liveOk && live.dates ? [
+    ["Search received", live.dates.search_received],
+    ["Commitment sent", live.dates.commitment_sent],
+    ["Closing scheduled", live.dates.scheduled_closing],
+    ["Closed / funded", live.dates.closed],
+    ["Policy sent", live.dates.policy_sent]
+  ].filter((d) => d[1]) : [];
+
+  const liveErr = (code) => ({
+    file_not_found: "We can't find that Lakeland file right now.",
+    not_linked: "Not connected yet.",
+    not_your_matter: "This matter isn't available."
+  }[code] || "Couldn't load live status.");
 
   return (
     <div>
@@ -230,14 +265,16 @@ function MatterDetail({ matter, onBack, onStage, onDelete }) {
 
       {/* Tracker */}
       <div style={{ padding: "20px 18px 14px", borderRadius: 14, border: `1px solid ${conn ? "#dbe9fa" : LINE}`, background: conn ? "linear-gradient(180deg,#fbfdff,#f4f9ff)" : "#f8fafc" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: BL, fontWeight: 600 }}>Current stage</div>
             <div style={{ fontFamily: "Fraunces,serif", fontSize: 18, fontWeight: 600, color: NV }}>{STAGES[stage]}</div>
           </div>
           {conn
-            ? <span style={tag("#e8f3ff", "#0f6fd1")}>◆ Lakeland file</span>
-            : <span style={tag("#f1f5f9", "#64748b")}>Not connected</span>}
+            ? (linked
+                ? <span style={tag("#e8f3ff", "#0f6fd1")}>● Live · Lakeland #{matter.lakeland_file_number}</span>
+                : <span style={tag("#fff7ed", "#b45309")}>Not connected</span>)
+            : <span style={tag("#f1f5f9", "#64748b")}>Manual</span>}
         </div>
         <div style={{ display: "flex", alignItems: "flex-start" }}>
           {STAGES.map((s, i) => {
@@ -255,13 +292,41 @@ function MatterDetail({ matter, onBack, onStage, onDelete }) {
             );
           })}
         </div>
-        <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 9 }}>
-          <span style={{ fontSize: 12, color: MUTED }}>{conn ? "Live Lakeland status connects in a later build — set it manually for now:" : "Update status:"}</span>
-          <select value={stage} onChange={(e) => onStage(matter, parseInt(e.target.value, 10))} style={{ padding: "6px 9px", border: `1px solid ${LINE}`, borderRadius: 7, fontSize: 12.5 }}>
-            {STAGES.map((s, i) => <option key={s} value={i}>{s}</option>)}
-          </select>
-        </div>
+
+        {/* Footer: live / connect / manual */}
+        {conn ? (
+          linked ? (
+            <div style={{ marginTop: 16, fontSize: 12, color: MUTED, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: loadingLive ? "#cbd5e1" : liveOk ? "#16a34a" : "#f59e0b", flexShrink: 0 }} />
+              {loadingLive ? "Syncing live status…" : liveOk ? "Live from Lakeland — updates automatically as your file progresses." : liveErr(live && live.error)}
+            </div>
+          ) : (
+            <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <button onClick={() => setShowConnect(true)} style={{ padding: "9px 15px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>◆ Connect to Lakeland</button>
+              <span style={{ fontSize: 12, color: MUTED }}>Link this matter to its Lakeland file for live status.</span>
+            </div>
+          )
+        ) : (
+          <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 9 }}>
+            <span style={{ fontSize: 12, color: MUTED }}>Update status:</span>
+            <select value={stage} onChange={(e) => onStage(matter, parseInt(e.target.value, 10))} style={{ padding: "6px 9px", border: `1px solid ${LINE}`, borderRadius: 7, fontSize: 12.5 }}>
+              {STAGES.map((s, i) => <option key={s} value={i}>{s}</option>)}
+            </select>
+          </div>
+        )}
       </div>
+
+      {/* Live key dates */}
+      {dateRows.length > 0 && (
+        <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16, maxWidth: 420 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>Lakeland milestones</div>
+          {dateRows.map(([k, v]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderTop: "1px solid #eef1f6", fontSize: 13 }}>
+              <span style={{ color: MUTED }}>{k}</span><span style={{ fontWeight: 600 }}>{v}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Details */}
       <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16, maxWidth: 420 }}>
@@ -276,6 +341,53 @@ function MatterDetail({ matter, onBack, onStage, onDelete }) {
             This file isn't with Lakeland, so the live connection (ordering, document exchange) is hidden. The rest of your workspace works the same.
           </div>
         )}
+      </div>
+
+      {showConnect && <ConnectModal matter={matter} onClose={() => setShowConnect(false)} onLinked={() => { setShowConnect(false); onRefresh && onRefresh(); }} />}
+    </div>
+  );
+}
+
+/* ---------------- Connect-to-Lakeland modal ---------------- */
+function ConnectModal({ matter, onClose, onLinked }) {
+  const [fileNo, setFileNo] = useState(matter.file_number || "");
+  const [zip, setZip] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async () => {
+    const fn = fileNo.trim(), z = zip.trim();
+    if (!fn || !z) { setErr("Enter the Lakeland file number and the property ZIP."); return; }
+    setBusy(true); setErr("");
+    try {
+      const res = await linkLakelandMatter(matter.id, fn, z);
+      if (res && res.ok) { onLinked(); return; }
+      setErr(res && res.error === "no_match"
+        ? "No Lakeland file matches that file number and ZIP. Double-check both with your title contact."
+        : "Couldn't connect: " + ((res && res.error) || "unknown error"));
+      setBusy(false);
+    } catch (e) { setErr(e.message || String(e)); setBusy(false); }
+  };
+
+  const inp = { width: "100%", padding: "10px 12px", border: `1px solid ${LINE}`, borderRadius: 9, fontSize: 13.5, fontFamily: "inherit" };
+  const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#475569", margin: "12px 0 5px" };
+
+  return (
+    <div onClick={(e) => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, zIndex: 60 }}>
+      <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 430, boxShadow: "0 12px 40px rgba(16,24,40,.2)" }}>
+        <div style={{ padding: "18px 22px", borderBottom: `1px solid ${LINE}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 18 }}>Connect to Lakeland</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, color: "#9ca3af", cursor: "pointer" }}>×</button>
+        </div>
+        <div style={{ padding: 22 }}>
+          <div style={{ fontSize: 12.5, color: MUTED, marginBottom: 4 }}>Enter the Lakeland file number and the property ZIP code to link this matter to its file and turn on live status.</div>
+          <label style={lbl}>Lakeland file number</label>
+          <input style={inp} value={fileNo} onChange={(e) => setFileNo(e.target.value)} placeholder="e.g. 2026-01234" autoFocus />
+          <label style={lbl}>Property ZIP</label>
+          <input style={inp} value={zip} onChange={(e) => setZip(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="e.g. 08701" />
+          {err && <div style={{ marginTop: 10, fontSize: 12.5, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 11px" }}>{err}</div>}
+          <button onClick={submit} disabled={busy} style={{ width: "100%", marginTop: 16, padding: "11px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 14, cursor: busy ? "default" : "pointer" }}>{busy ? "Connecting…" : "Connect"}</button>
+        </div>
       </div>
     </div>
   );
