@@ -3,6 +3,7 @@ import { supabase } from "./supabase.js";
 import Login from "./Login.jsx";
 import Workspace from "./Workspace.jsx";
 import Accept from "./Accept.jsx";
+import OnboardingWizard from "./OnboardingWizard.jsx";
 
 // Auth + firm-context gate.
 //   loading   → checking session
@@ -102,6 +103,10 @@ export default function App() {
         <button className="btn" onClick={signOut}>Sign out</button>
       </div>
     );
+  }
+
+  if (ctx && !ctx.firm?.onboarded_at) {
+    return <OnboardingWizard firm={ctx.firm} onDone={() => { setStatus("loading"); loadContext(session); }} />;
   }
 
   return <Workspace ctx={ctx} email={session?.user?.email} onSignOut={signOut} />;
