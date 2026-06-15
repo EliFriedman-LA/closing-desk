@@ -11,22 +11,29 @@ export default function Accept({ token, session }) {
   const [error, setError] = useState("");
   const [invited, setInvited] = useState("");
 
+  const clearPending = () => { try { localStorage.removeItem("cd_pending_invite"); } catch {} };
+
   const redeem = useCallback(async () => {
     setPhase("redeeming");
     setError("");
     const { data, error } = await supabase.rpc("redeem_invite", { p_token: token });
     if (error) {
+      clearPending();
       setError(error.message);
       setPhase("error");
       return;
     }
     if (data && data.ok) {
-      try { localStorage.removeItem("cd_pending_invite"); } catch {}
+      clearPending();
       window.location.replace("/"); // clean reload → workspace
       return;
     }
     if (data && data.invited) setInvited(data.invited);
-    setError((data && data.error) || "unknown");
+    const code = (data && data.error) || "unknown";
+    // Drop the stored token on terminal outcomes so we don't bounce back here.
+    // Keep it only for email_mismatch, where signing in with the right email retries.
+    if (code !== "email_mismatch") clearPending();
+    setError(code);
     setPhase("error");
   }, [token]);
 
@@ -101,7 +108,7 @@ export default function Accept({ token, session }) {
           {mismatch ? (
             <button className="btn primary full" onClick={useDifferentEmail}>Use a different email</button>
           ) : (
-            <button className="btn full" onClick={() => window.location.replace("/")}>Go to sign in</button>
+            <button className="btn full" onClick={() => { clearPending(); window.location.replace("/"); }}>Go to sign in</button>
           )}
         </div>
       </div>
