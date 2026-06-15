@@ -63,3 +63,10 @@ export async function deleteContact(id) {
   const { error } = await supabase.from("firm_contacts").delete().eq("id", id);
   if (error) throw error;
 }
+
+/* ---------------- Firm (branding / onboarding) ---------------- */
+export async function updateFirm(id, patch) {
+  const { data, error } = await supabase.from("firms").update(patch).eq("id", id).select().single();
+  if (error) throw error;
+  return data;
+}

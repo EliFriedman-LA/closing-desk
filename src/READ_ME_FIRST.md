@@ -1,21 +1,24 @@
-# Phase 1.3 — Contacts (firm CRM)
+# Phase 1.4 — Onboarding wizard
 
-Run the firm_contacts SQL FIRST (in chat), then upload these to the
-**closing-desk** repo, inside `src/`:
+Run the firms onboarding SQL FIRST (in chat), then upload these into the
+**closing-desk** repo's `src/` folder:
 
-- `Workspace.jsx` → replace (adds Contacts to the nav + router)
-- `Contacts.jsx`  → NEW
-- `db.js`         → replace (adds contacts helpers + CONTACT_ROLES)
-- `styles.css`    → replace (contacts grid responsive rule appended)
+- `App.jsx`              → replace (shows the wizard on first run)
+- `OnboardingWizard.jsx` → NEW
+- `db.js`                → replace (adds updateFirm)
 
-No env changes.
+No styles.css change this time. No env changes.
 
 ## What you get
-- "Contacts" moves from "Coming soon" to a live page in the sidebar.
-- Add / edit / delete contacts: name, role, firm, email, phone, notes.
-- Search across all fields. Private to your firm (RLS-scoped).
+- A firm accepting an invite now lands on a quick branded setup card:
+  set the display name, pick a brand color (live preview banner), choose a
+  primary state. "Finish" or "Skip" — either way it won't show again.
+- The chosen brand color flows into the workspace banner + firm avatar.
+- The primary state pre-fills on new matters.
 
 ## Test
-- Open Contacts → Add contact → fill a few → they list and are searchable.
-- Click one to edit or delete.
-- These are separate from Lakeland's contacts — only your firm sees them.
+- Because the onboarded flag is new, your existing "test" firm will show the
+  wizard once on next load — run through it, pick a color, finish, and you'll
+  land in the workspace with that branding. Reload: it won't reappear.
+
+NOTE: This assumes `Contacts.jsx` is already in `src/` from 1.3 (it is now).
