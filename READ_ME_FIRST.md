@@ -1,25 +1,24 @@
-# Phase 0.4 (Part B) — Closing Desk: accept an invite
+# Phase 1.4 — Onboarding wizard
 
-Upload to the **closing-desk** repo, in the `src/` folder:
-- `App.jsx`    → replace existing
-- `Accept.jsx` → new file
+Run the firms onboarding SQL FIRST (in chat), then upload these into the
+**closing-desk** repo's `src/` folder:
 
-Vercel auto-builds. (Part A — the redeem_invite SQL — is already run.)
+- `App.jsx`              → replace (shows the wizard on first run)
+- `OnboardingWizard.jsx` → NEW
+- `db.js`                → replace (adds updateFirm)
 
-## How the flow works
-1. Attorney clicks the "Set up your account" button in the invite email
-   → lands on `…/accept?token=…`.
-2. If not signed in: they enter the invited email → get a magic link back to
-   `/accept` → return signed in.
-3. The app calls `redeem_invite(token)`, which links them to the firm, marks the
-   invite accepted, and activates the firm.
-4. They're redirected to `/` and land in their workspace.
+No styles.css change this time. No env changes.
 
-## Test end-to-end
-- In the staff Admin → Firms, invite a firm using an email you control.
-- Open the invite email → "Set up your account".
-- Enter that same email → magic link → it should redeem and drop you into the
-  connected workspace. Back in Admin → Firms, that firm flips to **accepted**.
+## What you get
+- A firm accepting an invite now lands on a quick branded setup card:
+  set the display name, pick a brand color (live preview banner), choose a
+  primary state. "Finish" or "Skip" — either way it won't show again.
+- The chosen brand color flows into the workspace banner + firm avatar.
+- The primary state pre-fills on new matters.
 
-Guard rails handled: wrong email (mismatch), expired, revoked, already-used, and
-already-in-a-firm all show a clear message instead of failing silently.
+## Test
+- Because the onboarded flag is new, your existing "test" firm will show the
+  wizard once on next load — run through it, pick a color, finish, and you'll
+  land in the workspace with that branding. Reload: it won't reappear.
+
+NOTE: This assumes `Contacts.jsx` is already in `src/` from 1.3 (it is now).
