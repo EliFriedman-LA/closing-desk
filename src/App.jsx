@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { supabase } from "./supabase.js";
 import Login from "./Login.jsx";
-import Home from "./Home.jsx";
+import Workspace from "./Workspace.jsx";
 import Accept from "./Accept.jsx";
 
 // Auth + firm-context gate.
@@ -104,5 +104,5 @@ export default function App() {
     );
   }
 
-  return <Home ctx={ctx} email={session?.user?.email} onSignOut={signOut} />;
+  return <Workspace ctx={ctx} email={session?.user?.email} onSignOut={signOut} />;
 }

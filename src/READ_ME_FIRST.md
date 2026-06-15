@@ -1,25 +1,31 @@
-# Phase 0.4 (Part B) — Closing Desk: accept an invite
+# Phase 1 (first chunk) — Workspace shell + Matters
 
-Upload to the **closing-desk** repo, in the `src/` folder:
-- `App.jsx`    → replace existing
-- `Accept.jsx` → new file
+Upload these to the **closing-desk** repo, INSIDE the `src/` folder (use
+Add file → Upload files *from within `src/`* so they don't land at the root):
 
-Vercel auto-builds. (Part A — the redeem_invite SQL — is already run.)
+- `App.jsx`       → replace (now loads the Workspace instead of the placeholder)
+- `Workspace.jsx` → NEW
+- `db.js`         → NEW
+- `styles.css`    → replace (mobile-nav rules appended)
 
-## How the flow works
-1. Attorney clicks the "Set up your account" button in the invite email
-   → lands on `…/accept?token=…`.
-2. If not signed in: they enter the invited email → get a magic link back to
-   `/accept` → return signed in.
-3. The app calls `redeem_invite(token)`, which links them to the firm, marks the
-   invite accepted, and activates the firm.
-4. They're redirected to `/` and land in their workspace.
+`Home.jsx` is no longer used — you can delete it or leave it; it's not imported.
 
-## Test end-to-end
-- In the staff Admin → Firms, invite a firm using an email you control.
-- Open the invite email → "Set up your account".
-- Enter that same email → magic link → it should redeem and drop you into the
-  connected workspace. Back in Admin → Firms, that firm flips to **accepted**.
+No SQL, no env changes. The `matters` table + RLS already exist from Phase 0.1.
 
-Guard rails handled: wrong email (mismatch), expired, revoked, already-used, and
-already-in-a-firm all show a clear message instead of failing silently.
+## What you get
+- A real app shell: sidebar + topbar, your firm branding, sign out.
+- **Dashboard**: firm banner + open / Lakeland / total counts + recent matters.
+- **Matters**: searchable list; **＋ New matter** opens a form with the
+  **Title handled by: Lakeland / Other** toggle (Other lets you type the company).
+- **Matter detail**: a closing-stage tracker (Lakeland files styled live-blue,
+  Other files greyed), set the stage manually for now, file details, delete.
+
+## Test
+- Sign in to your firm workspace → click **＋ New matter** → create one as
+  "Lakeland" and one as "Other / none" → open each.
+- Lakeland file shows the blue tracker + "live status connects later"; the Other
+  file shows the greyed tracker + the "not connected" note.
+- Everything is scoped to your firm by RLS — another firm can't see your matters.
+
+## Next chunks
+- Contacts / CRM, then the onboarding wizard, then the Lakeland live connection.
