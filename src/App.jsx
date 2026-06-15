@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { supabase } from "./supabase.js";
 import Login from "./Login.jsx";
 import Home from "./Home.jsx";
+import Accept from "./Accept.jsx";
 
 // Auth + firm-context gate.
 //   loading   → checking session
@@ -12,6 +13,17 @@ export default function App() {
   const [status, setStatus] = useState("loading");
   const [session, setSession] = useState(null);
   const [ctx, setCtx] = useState(null); // { role, firm, org }
+  // An invite token arrives in the URL (?token=…). Persist it so it survives the
+  // magic-link round-trip, then the Accept flow redeems it.
+  const [inviteToken] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search).get("token");
+      if (p) localStorage.setItem("cd_pending_invite", p);
+      return p || localStorage.getItem("cd_pending_invite") || null;
+    } catch {
+      return null;
+    }
+  });
 
   const loadContext = useCallback(async (sess) => {
     try {
@@ -71,6 +83,8 @@ export default function App() {
       </div>
     );
   }
+
+  if (inviteToken) return <Accept token={inviteToken} session={session} />;
 
   if (status === "signedout") return <Login />;
 
