@@ -3,6 +3,7 @@ import {
   listMatters, createMatter, updateMatter, deleteMatter,
   TX_TYPES, STATES, STAGES
 } from "./db.js";
+import Contacts from "./Contacts.jsx";
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0", FIRM_DEFAULT = "#0f5132";
 
@@ -87,8 +88,9 @@ export default function Workspace({ ctx, email, onSignOut }) {
         <nav style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
           {navItem("dashboard", "Dashboard", "▦")}
           {navItem("matters", "Matters", "▤")}
+          {navItem("contacts", "Contacts", "◍")}
           <div style={{ fontSize: 10, letterSpacing: ".09em", textTransform: "uppercase", color: "#6f93bb", padding: "16px 12px 6px", fontWeight: 600 }}>Coming soon</div>
-          {["◍ Contacts", "▣ Calendar", "✉ Smart Inbox", "▥ Documents"].map((t) => (
+          {["▣ Calendar", "✉ Smart Inbox", "▥ Documents"].map((t) => (
             <div key={t} style={{ padding: "9px 12px", fontSize: 13.5, color: "#5d7da6" }}>{t}</div>
           ))}
         </nav>
@@ -105,8 +107,10 @@ export default function Workspace({ ctx, email, onSignOut }) {
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         <header style={{ height: 60, background: "#fff", borderBottom: `1px solid ${LINE}`, display: "flex", alignItems: "center", gap: 14, padding: "0 22px", position: "sticky", top: 0, zIndex: 10 }}>
           <button onClick={() => setNavOpen((s) => !s)} className="cd-menu" style={{ display: "none", background: "none", border: "none", fontSize: 20, color: NV, cursor: "pointer" }}>☰</button>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search matters…" style={{ flex: 1, maxWidth: 380, padding: "9px 12px", border: `1px solid ${LINE}`, borderRadius: 9, background: "#f8fafc", fontSize: 13.5 }} />
-          <button onClick={() => setShowNew(true)} style={{ marginLeft: "auto", padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ New matter</button>
+          {page !== "contacts" && <>
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search matters…" style={{ flex: 1, maxWidth: 380, padding: "9px 12px", border: `1px solid ${LINE}`, borderRadius: 9, background: "#f8fafc", fontSize: 13.5 }} />
+            <button onClick={() => setShowNew(true)} style={{ marginLeft: "auto", padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ New matter</button>
+          </>}
         </header>
 
         <main style={{ padding: "24px 26px 60px", maxWidth: 1100, width: "100%" }}>
@@ -114,7 +118,9 @@ export default function Workspace({ ctx, email, onSignOut }) {
             ? <MatterDetail matter={selected} onBack={() => setSelectedId(null)} onStage={onStage} onDelete={onDelete} />
             : page === "dashboard"
               ? <Dashboard firm={firm} org={org} accent={accent} initials={initials} openCount={openCount} lakelandCount={lakelandCount} total={matters.length} recent={matters.slice(0, 5)} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} />
-              : <MattersList loading={loading} matters={filtered} total={matters.length} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
+              : page === "contacts"
+                ? <Contacts firmId={firm.id} />
+                : <MattersList loading={loading} matters={filtered} total={matters.length} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
         </main>
       </div>
 

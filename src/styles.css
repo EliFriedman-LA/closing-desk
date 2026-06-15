@@ -77,3 +77,6 @@ button{font-family:inherit;cursor:pointer}
   .cd-nav.open{transform:none}
   .cd-menu{display:block!important}
 }
+
+/* contacts grid → single column on mobile */
+@media (max-width:640px){ .cd-contacts-grid{grid-template-columns:1fr!important} }
