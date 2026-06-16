@@ -1,24 +1,33 @@
-# Phase 1.4 — Onboarding wizard
+# Closing Desk — Partner rename (one-time)
 
-Run the firms onboarding SQL FIRST (in chat), then upload these into the
-**closing-desk** repo's `src/` folder:
+Renames every Closing Desk file with a `Partner` prefix so the app can live in
+the SAME project/upload as the staff app without name collisions.
+Functionality is 100% unchanged — only filenames + import paths.
 
-- `App.jsx`              → replace (shows the wizard on first run)
-- `OnboardingWizard.jsx` → NEW
-- `db.js`                → replace (adds updateFirm)
+## 1) Upload these into the closing-desk repo
+- The 10 files in `src/`  → into the repo's **`src/`** folder
+- `index.html`            → into the repo **root** (it now points at partnerMain.jsx)
 
-No styles.css change this time. No env changes.
+## 2) DELETE the old files from `src/` (they're replaced)
+Delete these 11 from `src/` so only the Partner-named files remain:
+  App.jsx, Workspace.jsx, Login.jsx, Accept.jsx, Contacts.jsx,
+  OnboardingWizard.jsx, db.js, supabase.js, styles.css, main.jsx, Home.jsx
 
-## What you get
-- A firm accepting an invite now lands on a quick branded setup card:
-  set the display name, pick a brand color (live preview banner), choose a
-  primary state. "Finish" or "Skip" — either way it won't show again.
-- The chosen brand color flows into the workspace banner + firm avatar.
-- The primary state pre-fills on new matters.
+(If you forget to delete them the app still works — index.html boots from
+partnerMain.jsx and the old files become dead/unused — but deleting keeps it clean.)
 
-## Test
-- Because the onboarded flag is new, your existing "test" firm will show the
-  wizard once on next load — run through it, pick a color, finish, and you'll
-  land in the workspace with that branding. Reload: it won't reappear.
+## Name map (old → new)
+  App.jsx            → PartnerApp.jsx
+  Workspace.jsx      → PartnerWorkspace.jsx
+  Login.jsx          → PartnerLogin.jsx
+  Accept.jsx         → PartnerAccept.jsx
+  Contacts.jsx       → PartnerContacts.jsx
+  OnboardingWizard.jsx → PartnerOnboarding.jsx
+  db.js              → partnerDb.js
+  supabase.js        → partnerClient.js
+  styles.css         → partner.css
+  main.jsx           → partnerMain.jsx
+  Home.jsx           → (deleted, was unused)
+  index.html         → (same name, now references partnerMain.jsx)
 
-NOTE: This assumes `Contacts.jsx` is already in `src/` from 1.3 (it is now).
+No env changes. After deploy, the build boots from partnerMain.jsx → PartnerApp.
