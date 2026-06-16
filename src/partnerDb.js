@@ -133,3 +133,20 @@ export async function deleteDocument(doc) {
   const { error } = await supabase.from("file_documents").delete().eq("id", doc.id);
   if (error) throw error;
 }
+
+/* ---------------- Per-file messaging (Phase 2.4) ---------------- */
+export async function listMessages(matterId) {
+  const { data, error } = await supabase
+    .from("file_messages").select("*").eq("matter_id", matterId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+export async function postMessage(firmId, matterId, body, senderName) {
+  const { data, error } = await supabase.from("file_messages").insert({
+    matter_id: matterId, firm_id: firmId, sender_type: "firm",
+    sender_name: senderName || null, body
+  }).select().single();
+  if (error) throw error;
+  return data;
+}

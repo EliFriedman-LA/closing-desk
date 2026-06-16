@@ -4,6 +4,7 @@ import {
   linkLakelandMatter, getLakelandStatus,
   createOrderRequest, getMatterRequest, cancelOrderRequest,
   listDocuments, uploadDocument, documentUrl, deleteDocument,
+  listMessages, postMessage,
   TX_TYPES, STATES, STAGES
 } from "./partnerDb.js";
 import Contacts from "./PartnerContacts.jsx";
@@ -118,7 +119,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
 
         <main style={{ padding: "24px 26px 60px", maxWidth: 1100, width: "100%" }}>
           {selected
-            ? <MatterDetail matter={selected} onBack={() => setSelectedId(null)} onStage={onStage} onDelete={onDelete} onRefresh={load} />
+            ? <MatterDetail matter={selected} email={email} onBack={() => setSelectedId(null)} onStage={onStage} onDelete={onDelete} onRefresh={load} />
             : page === "dashboard"
               ? <Dashboard firm={firm} org={org} accent={accent} initials={initials} openCount={openCount} lakelandCount={lakelandCount} total={matters.length} recent={matters.slice(0, 5)} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} />
               : page === "contacts"
@@ -208,7 +209,7 @@ function MatterRow({ m, onOpen }) {
 }
 
 /* ---------------- Matter detail ---------------- */
-function MatterDetail({ matter, onBack, onStage, onDelete, onRefresh }) {
+function MatterDetail({ matter, email, onBack, onStage, onDelete, onRefresh }) {
   const conn = matter.title_provider === "lakeland";
   const linked = !!matter.lakeland_file_number;
   const [live, setLive] = useState(null);
@@ -359,6 +360,8 @@ function MatterDetail({ matter, onBack, onStage, onDelete, onRefresh }) {
 
       <DocumentsPanel matter={matter} />
 
+      <MessagesPanel matter={matter} email={email} />
+
       {showConnect && <ConnectModal matter={matter} onClose={() => setShowConnect(false)} onLinked={() => { setShowConnect(false); onRefresh && onRefresh(); }} />}
       {showPlace && <PlaceOrderModal matter={matter} onClose={() => setShowPlace(false)} onPlaced={async () => { setShowPlace(false); const r = await getMatterRequest(matter.id); setRequest(r); }} />}
     </div>
@@ -430,6 +433,76 @@ function DocumentsPanel({ matter }) {
             </div>
           ))}
         </div>}
+    </div>
+  );
+}
+
+/* ---------------- Messages panel ---------------- */
+function MessagesPanel({ matter, email }) {
+  const [msgs, setMsgs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const endRef = useRef(null);
+  const connected = !!matter.lakeland_file_number;
+
+  const load = async (scroll) => {
+    try {
+      const m = await listMessages(matter.id);
+      setMsgs(m);
+      if (scroll) setTimeout(() => endRef.current && endRef.current.scrollIntoView({ behavior: "smooth" }), 50);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+  useEffect(() => {
+    setLoading(true); load(true);
+    const id = setInterval(() => load(false), 20000);
+    return () => clearInterval(id);
+    /* eslint-disable-next-line */
+  }, [matter.id]);
+
+  const send = async () => {
+    const body = text.trim();
+    if (!body || !connected) return;
+    setBusy(true); setErr("");
+    try { await postMessage(matter.firm_id, matter.id, body, email); setText(""); await load(true); }
+    catch (e) { setErr(e.message || String(e)); }
+    setBusy(false);
+  };
+  const onKey = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
+  const fmt = (s) => { try { return new Date(s).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch { return ""; } };
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16, maxWidth: 560 }}>
+      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Messages</div>
+      <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 12 }}>
+        {connected ? "Direct line to the Lakeland team on this file." : "Connect this matter to a Lakeland file to message the title team."}
+      </div>
+      {err && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 8 }}>{err}</div>}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 320, overflowY: "auto", padding: "4px 2px" }}>
+        {loading ? <div style={{ fontSize: 12.5, color: "#9ca3af" }}>Loading…</div>
+          : msgs.length === 0 ? <div style={{ fontSize: 12.5, color: "#9ca3af", padding: "8px 0" }}>{connected ? "No messages yet. Say hello \uD83D\uDC4B" : "No messages yet."}</div>
+          : msgs.map((m) => {
+            const mine = m.sender_type === "firm";
+            return (
+              <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start" }}>
+                <div style={{ fontSize: 10.5, color: MUTED, margin: "0 4px 3px" }}>{mine ? "You" : "Lakeland"}{m.sender_name ? ` \u00B7 ${m.sender_name}` : ""} \u00B7 {fmt(m.created_at)}</div>
+                <div style={{ maxWidth: "82%", padding: "9px 12px", borderRadius: 13, fontSize: 13, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word", background: mine ? BL : "#f1f5f9", color: mine ? "#fff" : "#0f172a", borderBottomRightRadius: mine ? 4 : 13, borderBottomLeftRadius: mine ? 13 : 4 }}>{m.body}</div>
+              </div>
+            );
+          })}
+        <div ref={endRef} />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} rows={2}
+          placeholder={connected ? "Write a message\u2026" : "Connect to a file first"} disabled={!connected || busy}
+          style={{ flex: 1, resize: "none", border: `1px solid ${LINE}`, borderRadius: 9, padding: "9px 11px", fontSize: 13, fontFamily: "inherit", outline: "none", background: connected ? "#fff" : "#f8fafc" }} />
+        <button onClick={send} disabled={!connected || busy || !text.trim()}
+          style={{ padding: "0 16px", background: (!connected || busy || !text.trim()) ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: (!connected || busy || !text.trim()) ? "default" : "pointer" }}>{busy ? "\u2026" : "Send"}</button>
+      </div>
     </div>
   );
 }
