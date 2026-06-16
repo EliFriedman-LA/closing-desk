@@ -163,3 +163,99 @@ export async function listUnreads() {
   (data || []).forEach((r) => { map[r.matter_id] = r.unread; });
   return map;
 }
+
+/* ---------------- Deadlines (Phase 3.1) ---------------- */
+export const DEADLINE_ANCHORS = [["contract", "Contract date"], ["closing", "Closing date"]];
+
+export async function listDeadlineTemplates() {
+  const { data, error } = await supabase.from("firm_deadline_templates")
+    .select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+export async function createDeadlineTemplate(firmId, payload) {
+  const { data, error } = await supabase.from("firm_deadline_templates")
+    .insert({ firm_id: firmId, ...payload }).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function updateDeadlineTemplate(id, patch) {
+  const { data, error } = await supabase.from("firm_deadline_templates")
+    .update(patch).eq("id", id).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function deleteDeadlineTemplate(id) {
+  const { error } = await supabase.from("firm_deadline_templates").delete().eq("id", id);
+  if (error) throw error;
+}
+const DEFAULT_DEADLINES = [
+  { name: "Attorney review ends", anchor: "contract", offset_days: 3 },
+  { name: "Inspection due",       anchor: "contract", offset_days: 10 },
+  { name: "Mortgage commitment",  anchor: "contract", offset_days: 30 },
+  { name: "Clear to close",       anchor: "closing",  offset_days: -3 },
+  { name: "Final walkthrough",    anchor: "closing",  offset_days: -1 },
+  { name: "Closing day",          anchor: "closing",  offset_days: 0 },
+];
+export async function seedDefaultTemplates(firmId) {
+  const rows = DEFAULT_DEADLINES.map((d, i) => ({ firm_id: firmId, ...d, sort_order: i }));
+  const { data, error } = await supabase.from("firm_deadline_templates").insert(rows).select();
+  if (error) throw error;
+  return data || [];
+}
+
+export async function listMatterDeadlines(matterId) {
+  const { data, error } = await supabase.from("matter_deadlines")
+    .select("*").eq("matter_id", matterId)
+    .order("due_date", { ascending: true, nullsFirst: false }).order("sort_order", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+export async function createMatterDeadline(firmId, matterId, payload) {
+  const { data, error } = await supabase.from("matter_deadlines")
+    .insert({ firm_id: firmId, matter_id: matterId, source: "manual", ...payload }).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function updateMatterDeadline(id, patch) {
+  const { data, error } = await supabase.from("matter_deadlines")
+    .update(patch).eq("id", id).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function deleteMatterDeadline(id) {
+  const { error } = await supabase.from("matter_deadlines").delete().eq("id", id);
+  if (error) throw error;
+}
+
+function addDays(dateStr, days) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr + "T00:00:00");
+  if (isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + (days || 0));
+  return d.toISOString().slice(0, 10);
+}
+// Generate/refresh template deadlines for a matter from the firm's template.
+// Refreshes due dates on existing template rows, inserts new ones, skips
+// templates whose anchor date isn't set. Manual deadlines are untouched.
+export async function generateDeadlines(firmId, matter) {
+  const templates = await listDeadlineTemplates();
+  const existing = await listMatterDeadlines(matter.id);
+  const byTemplate = {};
+  existing.forEach((d) => { if (d.template_id) byTemplate[d.template_id] = d; });
+  let added = 0, updated = 0, skipped = 0;
+  for (const t of templates) {
+    if (t.active === false) continue;
+    const anchorDate = t.anchor === "closing" ? matter.closing_date : matter.contract_date;
+    const due = addDays(anchorDate, t.offset_days);
+    if (!due) { skipped++; continue; }
+    const ex = byTemplate[t.id];
+    if (ex) {
+      if (ex.due_date !== due || ex.name !== t.name) { await updateMatterDeadline(ex.id, { due_date: due, name: t.name }); updated++; }
+    } else {
+      await createMatterDeadline(firmId, matter.id, { name: t.name, due_date: due, source: "template", template_id: t.id, sort_order: t.sort_order });
+      added++;
+    }
+  }
+  return { added, updated, skipped };
+}

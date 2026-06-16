@@ -5,6 +5,8 @@ import {
   createOrderRequest, getMatterRequest, cancelOrderRequest,
   listDocuments, uploadDocument, documentUrl, deleteDocument,
   listMessages, postMessage, markRead, listUnreads,
+  listDeadlineTemplates, createDeadlineTemplate, updateDeadlineTemplate, deleteDeadlineTemplate, seedDefaultTemplates,
+  listMatterDeadlines, createMatterDeadline, updateMatterDeadline, deleteMatterDeadline, generateDeadlines, DEADLINE_ANCHORS,
   TX_TYPES, STATES, STAGES
 } from "./partnerDb.js";
 import Contacts from "./PartnerContacts.jsx";
@@ -99,6 +101,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
           {navItem("dashboard", "Dashboard", "▦")}
           {navItem("matters", "Matters", "▤")}
           {navItem("contacts", "Contacts", "◍")}
+          {navItem("deadlinesetup", "Deadline setup", "◷")}
           <div style={{ fontSize: 10, letterSpacing: ".09em", textTransform: "uppercase", color: "#6f93bb", padding: "16px 12px 6px", fontWeight: 600 }}>Coming soon</div>
           {["▣ Calendar", "✉ Smart Inbox", "▥ Documents"].map((t) => (
             <div key={t} style={{ padding: "9px 12px", fontSize: 13.5, color: "#5d7da6" }}>{t}</div>
@@ -130,7 +133,9 @@ export default function Workspace({ ctx, email, onSignOut }) {
               ? <Dashboard firm={firm} org={org} accent={accent} initials={initials} openCount={openCount} lakelandCount={lakelandCount} total={matters.length} recent={matters.slice(0, 5)} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} />
               : page === "contacts"
                 ? <Contacts firmId={firm.id} />
-                : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
+                : page === "deadlinesetup"
+                  ? <DeadlineSetup firmId={firm.id} />
+                  : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
         </main>
       </div>
 
@@ -365,6 +370,8 @@ function MatterDetail({ matter, email, onBack, onStage, onDelete, onRefresh, onR
         )}
       </div>
 
+      <DeadlinesPanel matter={matter} onRefresh={onRefresh} />
+
       <DocumentsPanel matter={matter} />
 
       <MessagesPanel matter={matter} email={email} onRead={onRead} />
@@ -440,6 +447,193 @@ function DocumentsPanel({ matter }) {
             </div>
           ))}
         </div>}
+    </div>
+  );
+}
+
+/* ---------------- Deadlines panel (per matter) ---------------- */
+function DeadlinesPanel({ matter, onRefresh }) {
+  const [contractDate, setContractDate] = useState(matter.contract_date || "");
+  const [closingDate, setClosingDate] = useState(matter.closing_date || "");
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [nName, setNName] = useState("");
+  const [nDate, setNDate] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    try { setItems(await listMatterDeadlines(matter.id)); } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+  useEffect(() => {
+    setContractDate(matter.contract_date || "");
+    setClosingDate(matter.closing_date || "");
+    load();
+    /* eslint-disable-next-line */
+  }, [matter.id]);
+
+  const saveDates = async (patch) => {
+    try { await updateMatter(matter.id, patch); onRefresh && onRefresh(); }
+    catch (e) { setMsg(e.message || String(e)); }
+  };
+  const onContract = (v) => { setContractDate(v); saveDates({ contract_date: v || null }); };
+  const onClosing = (v) => { setClosingDate(v); saveDates({ closing_date: v || null }); };
+
+  const generate = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const r = await generateDeadlines(matter.firm_id, { ...matter, contract_date: contractDate || null, closing_date: closingDate || null });
+      await load();
+      const bits = [];
+      if (r.added) bits.push(`${r.added} added`);
+      if (r.updated) bits.push(`${r.updated} updated`);
+      if (r.skipped) bits.push(`${r.skipped} skipped (no anchor date)`);
+      setMsg(bits.length ? bits.join(" \u00B7 ") : "Nothing to generate \u2014 set up your template in Deadline setup.");
+    } catch (e) { setMsg(e.message || String(e)); }
+    setBusy(false);
+  };
+  const toggle = async (d) => {
+    const done = !d.done;
+    setItems((p) => p.map((x) => x.id === d.id ? { ...x, done } : x));
+    try { await updateMatterDeadline(d.id, { done, done_at: done ? new Date().toISOString() : null }); } catch (e) { load(); }
+  };
+  const addManual = async () => {
+    if (!nName.trim()) return;
+    setBusy(true);
+    try { await createMatterDeadline(matter.firm_id, matter.id, { name: nName.trim(), due_date: nDate || null }); setNName(""); setNDate(""); setAdding(false); await load(); }
+    catch (e) { setMsg(e.message || String(e)); }
+    setBusy(false);
+  };
+  const editDate = async (d, v) => {
+    setItems((p) => p.map((x) => x.id === d.id ? { ...x, due_date: v || null } : x));
+    try { await updateMatterDeadline(d.id, { due_date: v || null }); } catch (e) { load(); }
+  };
+  const remove = async (d) => {
+    if (!window.confirm(`Delete "${d.name}"?`)) return;
+    try { await deleteMatterDeadline(d.id); await load(); } catch (e) { setMsg(e.message || String(e)); }
+  };
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const fmt = (s) => { if (!s) return "No date"; try { return new Date(s + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch { return s; } };
+  const isOverdue = (d) => d.due_date && !d.done && new Date(d.due_date + "T00:00:00") < today;
+  const dateInput = { border: `1px solid ${LINE}`, borderRadius: 8, padding: "7px 9px", fontSize: 13, fontFamily: "inherit", outline: "none" };
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16, maxWidth: 560 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Deadlines</div>
+        <button onClick={generate} disabled={busy} style={{ padding: "7px 13px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>{busy ? "\u2026" : "\u21BB Generate from template"}</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
+        <label style={{ fontSize: 12, color: MUTED }}>Contract date<br />
+          <input type="date" value={contractDate} onChange={(e) => onContract(e.target.value)} style={{ ...dateInput, marginTop: 4 }} />
+        </label>
+        <label style={{ fontSize: 12, color: MUTED }}>Closing date<br />
+          <input type="date" value={closingDate} onChange={(e) => onClosing(e.target.value)} style={{ ...dateInput, marginTop: 4 }} />
+        </label>
+      </div>
+      {msg && <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 10 }}>{msg}</div>}
+
+      {loading ? <div style={{ fontSize: 12.5, color: "#9ca3af" }}>Loading\u2026</div>
+        : items.length === 0 ? <div style={{ fontSize: 12.5, color: "#9ca3af", padding: "6px 0" }}>No deadlines yet. Set your dates and hit \u201CGenerate,\u201D or add one below.</div>
+          : <div style={{ display: "flex", flexDirection: "column" }}>
+            {items.map((d) => (
+              <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: "1px solid #eef1f6" }}>
+                <input type="checkbox" checked={!!d.done} onChange={() => toggle(d)} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: d.done ? "#9ca3af" : NV, textDecoration: d.done ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}{d.source === "template" && <span style={{ ...tag("#eef2ff", "#4338ca"), marginLeft: 6 }}>auto</span>}</div>
+                  <div style={{ fontSize: 11, color: isOverdue(d) ? "#dc2626" : MUTED, fontWeight: isOverdue(d) ? 600 : 400 }}>{fmt(d.due_date)}{isOverdue(d) ? " \u00B7 overdue" : ""}</div>
+                </div>
+                <input type="date" value={d.due_date || ""} onChange={(e) => editDate(d, e.target.value)} style={{ ...dateInput, padding: "4px 6px", fontSize: 11.5 }} />
+                <button onClick={() => remove(d)} title="Delete" style={{ padding: "5px 8px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 11.5, cursor: "pointer" }}>\u2715</button>
+              </div>
+            ))}
+          </div>}
+
+      {adding
+        ? <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <input value={nName} onChange={(e) => setNName(e.target.value)} placeholder="Deadline name" style={{ ...dateInput, flex: 1, minWidth: 140 }} />
+          <input type="date" value={nDate} onChange={(e) => setNDate(e.target.value)} style={dateInput} />
+          <button onClick={addManual} disabled={busy || !nName.trim()} style={{ padding: "0 14px", background: (busy || !nName.trim()) ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: (busy || !nName.trim()) ? "default" : "pointer" }}>Add</button>
+          <button onClick={() => { setAdding(false); setNName(""); setNDate(""); }} style={{ padding: "0 12px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12.5, cursor: "pointer" }}>Cancel</button>
+        </div>
+        : <button onClick={() => setAdding(true)} style={{ marginTop: 12, fontSize: 12.5, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer", padding: 0 }}>\uFF0B Add deadline</button>}
+    </div>
+  );
+}
+
+/* ---------------- Deadline setup (firm template) ---------------- */
+function DeadlineSetup({ firmId }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => { setLoading(true); try { setRows(await listDeadlineTemplates()); } catch (e) { console.error(e); } setLoading(false); };
+  useEffect(() => { load(); }, []);
+
+  const addRow = async () => {
+    setBusy(true);
+    try { await createDeadlineTemplate(firmId, { name: "New deadline", anchor: "contract", offset_days: 0, sort_order: rows.length }); await load(); }
+    catch (e) { alert(e.message || String(e)); }
+    setBusy(false);
+  };
+  const seed = async () => {
+    setBusy(true);
+    try { await seedDefaultTemplates(firmId); await load(); }
+    catch (e) { alert(e.message || String(e)); }
+    setBusy(false);
+  };
+  const patch = async (id, p) => {
+    setRows((prev) => prev.map((r) => r.id === id ? { ...r, ...p } : r));
+    try { await updateDeadlineTemplate(id, p); } catch (e) { load(); }
+  };
+  const remove = async (r) => {
+    if (!window.confirm(`Remove "${r.name}" from your template?`)) return;
+    try { await deleteDeadlineTemplate(r.id); await load(); } catch (e) { alert(e.message || String(e)); }
+  };
+
+  const inp = { border: `1px solid ${LINE}`, borderRadius: 8, padding: "7px 9px", fontSize: 13, fontFamily: "inherit", outline: "none" };
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: BL, fontWeight: 600 }}>Settings</div>
+        <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Deadline setup</div>
+        <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Your firm's standard deadlines. Each is an offset from a matter's contract or closing date. They auto-fill onto a matter when you hit \u201CGenerate.\u201D</div>
+      </div>
+
+      <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 6 }}>
+        {loading ? <div style={{ padding: 22, color: "#9ca3af", fontSize: 13 }}>Loading\u2026</div>
+          : rows.length === 0
+            ? <div style={{ padding: "26px 18px", textAlign: "center" }}>
+              <div style={{ color: MUTED, fontSize: 13, marginBottom: 12 }}>No deadlines set up yet.</div>
+              <button onClick={seed} disabled={busy} style={{ padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer", marginRight: 8 }}>Load NJ starter set</button>
+              <button onClick={addRow} disabled={busy} style={{ padding: "9px 16px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>\uFF0B Add one</button>
+            </div>
+            : <div>
+              <div style={{ display: "flex", gap: 8, padding: "8px 12px", fontSize: 11, color: MUTED, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em" }}>
+                <div style={{ flex: 1 }}>Deadline</div><div style={{ width: 150 }}>Anchor</div><div style={{ width: 130 }}>Offset (days)</div><div style={{ width: 28 }} />
+              </div>
+              {rows.map((r) => (
+                <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 12px", borderTop: "1px solid #eef1f6" }}>
+                  <input value={r.name} onChange={(e) => patch(r.id, { name: e.target.value })} style={{ ...inp, flex: 1 }} />
+                  <select value={r.anchor} onChange={(e) => patch(r.id, { anchor: e.target.value })} style={{ ...inp, width: 150 }}>
+                    {DEADLINE_ANCHORS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                  <input type="number" value={r.offset_days} onChange={(e) => patch(r.id, { offset_days: parseInt(e.target.value || "0", 10) })} style={{ ...inp, width: 130 }} />
+                  <button onClick={() => remove(r)} title="Remove" style={{ padding: "6px 9px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>\u2715</button>
+                </div>
+              ))}
+              <div style={{ padding: "10px 12px" }}>
+                <button onClick={addRow} disabled={busy} style={{ fontSize: 12.5, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer", padding: 0 }}>\uFF0B Add deadline</button>
+              </div>
+            </div>}
+      </div>
+      <div style={{ fontSize: 11.5, color: MUTED, marginTop: 10 }}>Tip: a negative offset means \u201Cbefore\u201D the anchor (e.g. Closing \u22123 = three days before closing). Positive means after.</div>
     </div>
   );
 }
