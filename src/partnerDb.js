@@ -150,3 +150,16 @@ export async function postMessage(firmId, matterId, body, senderName) {
   if (error) throw error;
   return data;
 }
+
+export async function markRead(firmId, matterId) {
+  const { error } = await supabase.from("file_message_reads")
+    .upsert({ matter_id: matterId, firm_id: firmId, side: "firm", last_read_at: new Date().toISOString() }, { onConflict: "matter_id,side" });
+  if (error) throw error;
+}
+export async function listUnreads() {
+  const { data, error } = await supabase.rpc("firm_matter_unreads");
+  if (error) throw error;
+  const map = {};
+  (data || []).forEach((r) => { map[r.matter_id] = r.unread; });
+  return map;
+}

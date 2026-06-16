@@ -4,7 +4,7 @@ import {
   linkLakelandMatter, getLakelandStatus,
   createOrderRequest, getMatterRequest, cancelOrderRequest,
   listDocuments, uploadDocument, documentUrl, deleteDocument,
-  listMessages, postMessage,
+  listMessages, postMessage, markRead, listUnreads,
   TX_TYPES, STATES, STAGES
 } from "./partnerDb.js";
 import Contacts from "./PartnerContacts.jsx";
@@ -24,13 +24,19 @@ export default function Workspace({ ctx, email, onSignOut }) {
   const [showNew, setShowNew] = useState(false);
   const [query, setQuery] = useState("");
   const [navOpen, setNavOpen] = useState(false);
+  const [unreads, setUnreads] = useState({});
 
   const load = async () => {
     setLoading(true);
     try { setMatters(await listMatters()); } catch (e) { console.error(e); }
     setLoading(false);
   };
-  useEffect(() => { load(); }, []);
+  const loadUnreads = async () => { try { setUnreads(await listUnreads()); } catch (e) { /* ignore */ } };
+  useEffect(() => {
+    load(); loadUnreads();
+    const id = setInterval(loadUnreads, 25000);
+    return () => clearInterval(id);
+  }, []);
 
   const selected = matters.find((m) => m.id === selectedId) || null;
   const filtered = useMemo(() => {
@@ -119,12 +125,12 @@ export default function Workspace({ ctx, email, onSignOut }) {
 
         <main style={{ padding: "24px 26px 60px", maxWidth: 1100, width: "100%" }}>
           {selected
-            ? <MatterDetail matter={selected} email={email} onBack={() => setSelectedId(null)} onStage={onStage} onDelete={onDelete} onRefresh={load} />
+            ? <MatterDetail matter={selected} email={email} onBack={() => setSelectedId(null)} onStage={onStage} onDelete={onDelete} onRefresh={load} onRead={loadUnreads} />
             : page === "dashboard"
-              ? <Dashboard firm={firm} org={org} accent={accent} initials={initials} openCount={openCount} lakelandCount={lakelandCount} total={matters.length} recent={matters.slice(0, 5)} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} />
+              ? <Dashboard firm={firm} org={org} accent={accent} initials={initials} openCount={openCount} lakelandCount={lakelandCount} total={matters.length} recent={matters.slice(0, 5)} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} />
               : page === "contacts"
                 ? <Contacts firmId={firm.id} />
-                : <MattersList loading={loading} matters={filtered} total={matters.length} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
+                : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
         </main>
       </div>
 
@@ -134,7 +140,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
 }
 
 /* ---------------- Dashboard ---------------- */
-function Dashboard({ firm, org, accent, initials, openCount, lakelandCount, total, recent, onOpen, onNew }) {
+function Dashboard({ firm, org, accent, initials, openCount, lakelandCount, total, recent, unreads = {}, onOpen, onNew }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 18, padding: 22, borderRadius: 16, color: "#fff", marginBottom: 18, background: `linear-gradient(100deg, ${shade(accent)}, ${accent})` }}>
@@ -160,14 +166,14 @@ function Dashboard({ firm, org, accent, initials, openCount, lakelandCount, tota
         </div>
         {recent.length === 0
           ? <div style={{ padding: "26px 18px", color: "#9ca3af", fontSize: 13 }}>No matters yet. Click “New matter” to open your first file.</div>
-          : recent.map((m) => <MatterRow key={m.id} m={m} onOpen={onOpen} />)}
+          : recent.map((m) => <MatterRow key={m.id} m={m} unread={unreads[m.id]} onOpen={onOpen} />)}
       </div>
     </div>
   );
 }
 
 /* ---------------- Matters list ---------------- */
-function MattersList({ loading, matters, total, onOpen, onNew, query }) {
+function MattersList({ loading, matters, total, unreads = {}, onOpen, onNew, query }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 18 }}>
@@ -183,13 +189,13 @@ function MattersList({ loading, matters, total, onOpen, onNew, query }) {
           ? <div style={{ padding: "26px 18px", color: "#9ca3af", fontSize: 13 }}>Loading…</div>
           : matters.length === 0
             ? <div style={{ padding: "30px 18px", color: "#9ca3af", fontSize: 13, textAlign: "center" }}>{query ? "No matters match your search." : "No matters yet — open your first file with “New matter.”"}</div>
-            : matters.map((m) => <MatterRow key={m.id} m={m} onOpen={onOpen} />)}
+            : matters.map((m) => <MatterRow key={m.id} m={m} unread={unreads[m.id]} onOpen={onOpen} />)}
       </div>
     </div>
   );
 }
 
-function MatterRow({ m, onOpen }) {
+function MatterRow({ m, unread, onOpen }) {
   const provTag = m.title_provider === "lakeland"
     ? <span style={tag("#e8f3ff", "#0f6fd1")}>◆ Lakeland</span>
     : <span style={tag("#f1f5f9", "#64748b")}>{m.title_company_name || "Other"}</span>;
@@ -202,6 +208,7 @@ function MatterRow({ m, onOpen }) {
         <div style={{ fontSize: 12, color: MUTED, marginTop: 1 }}>{[m.town, m.transaction_type].filter(Boolean).join(" · ") || "—"}</div>
       </div>
       <div style={{ flex: 1 }} />
+      {unread > 0 && <span title="New messages from Lakeland" style={{ background: "#ef4444", color: "#fff", fontSize: 11, fontWeight: 700, minWidth: 18, height: 18, borderRadius: 9, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{unread}</span>}
       {provTag}
       <span style={tag("#f8fafc", "#475569")}>{stageLabel}</span>
     </div>
@@ -209,7 +216,7 @@ function MatterRow({ m, onOpen }) {
 }
 
 /* ---------------- Matter detail ---------------- */
-function MatterDetail({ matter, email, onBack, onStage, onDelete, onRefresh }) {
+function MatterDetail({ matter, email, onBack, onStage, onDelete, onRefresh, onRead }) {
   const conn = matter.title_provider === "lakeland";
   const linked = !!matter.lakeland_file_number;
   const [live, setLive] = useState(null);
@@ -360,7 +367,7 @@ function MatterDetail({ matter, email, onBack, onStage, onDelete, onRefresh }) {
 
       <DocumentsPanel matter={matter} />
 
-      <MessagesPanel matter={matter} email={email} />
+      <MessagesPanel matter={matter} email={email} onRead={onRead} />
 
       {showConnect && <ConnectModal matter={matter} onClose={() => setShowConnect(false)} onLinked={() => { setShowConnect(false); onRefresh && onRefresh(); }} />}
       {showPlace && <PlaceOrderModal matter={matter} onClose={() => setShowPlace(false)} onPlaced={async () => { setShowPlace(false); const r = await getMatterRequest(matter.id); setRequest(r); }} />}
@@ -438,7 +445,7 @@ function DocumentsPanel({ matter }) {
 }
 
 /* ---------------- Messages panel ---------------- */
-function MessagesPanel({ matter, email }) {
+function MessagesPanel({ matter, email, onRead }) {
   const [msgs, setMsgs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
@@ -447,17 +454,18 @@ function MessagesPanel({ matter, email }) {
   const endRef = useRef(null);
   const connected = !!matter.lakeland_file_number;
 
-  const load = async (scroll) => {
+  const load = async (scroll, mark) => {
     try {
       const m = await listMessages(matter.id);
       setMsgs(m);
       if (scroll) setTimeout(() => endRef.current && endRef.current.scrollIntoView({ behavior: "smooth" }), 50);
+      if (mark && connected) { try { await markRead(matter.firm_id, matter.id); onRead && onRead(); } catch (_) {} }
     } catch (e) { console.error(e); }
     setLoading(false);
   };
   useEffect(() => {
-    setLoading(true); load(true);
-    const id = setInterval(() => load(false), 20000);
+    setLoading(true); load(true, true);
+    const id = setInterval(() => load(false, false), 20000);
     return () => clearInterval(id);
     /* eslint-disable-next-line */
   }, [matter.id]);
@@ -466,7 +474,7 @@ function MessagesPanel({ matter, email }) {
     const body = text.trim();
     if (!body || !connected) return;
     setBusy(true); setErr("");
-    try { await postMessage(matter.firm_id, matter.id, body, email); setText(""); await load(true); }
+    try { await postMessage(matter.firm_id, matter.id, body, email); setText(""); await load(true, true); }
     catch (e) { setErr(e.message || String(e)); }
     setBusy(false);
   };
