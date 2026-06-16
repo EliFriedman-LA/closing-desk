@@ -268,3 +268,37 @@ export async function listFirmDeadlines() {
   if (error) throw error;
   return data || [];
 }
+
+/* ---------------- Quote fee lines (Phase 3.3b) ---------------- */
+export async function listFeeLines() {
+  const { data, error } = await supabase.from("firm_fee_lines")
+    .select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+export async function createFeeLine(firmId, payload) {
+  const { data, error } = await supabase.from("firm_fee_lines").insert({ firm_id: firmId, ...payload }).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function updateFeeLine(id, patch) {
+  const { data, error } = await supabase.from("firm_fee_lines").update(patch).eq("id", id).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function deleteFeeLine(id) {
+  const { error } = await supabase.from("firm_fee_lines").delete().eq("id", id);
+  if (error) throw error;
+}
+const DEFAULT_FEES = [
+  { name: "Settlement / closing fee", amount: 750 },
+  { name: "Title search", amount: 250 },
+  { name: "Recording service fee", amount: 75 },
+  { name: "Wire / courier", amount: 50 },
+];
+export async function seedDefaultFees(firmId) {
+  const rows = DEFAULT_FEES.map((d, i) => ({ firm_id: firmId, ...d, sort_order: i }));
+  const { data, error } = await supabase.from("firm_fee_lines").insert(rows).select();
+  if (error) throw error;
+  return data || [];
+}

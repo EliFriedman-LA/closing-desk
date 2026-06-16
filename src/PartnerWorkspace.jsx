@@ -11,6 +11,7 @@ import {
 } from "./partnerDb.js";
 import Contacts from "./PartnerContacts.jsx";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
+import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0", FIRM_DEFAULT = "#0f5132";
 
@@ -105,6 +106,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
           {navItem("quotes", "Quotes", "◈")}
           {navItem("contacts", "Contacts", "◍")}
           {navItem("deadlinesetup", "Deadline setup", "◷")}
+          {navItem("feesetup", "Quote fees", "◇")}
           <div style={{ fontSize: 10, letterSpacing: ".09em", textTransform: "uppercase", color: "#6f93bb", padding: "16px 12px 6px", fontWeight: 600 }}>Coming soon</div>
           {["▣ Calendar", "✉ Smart Inbox", "▥ Documents"].map((t) => (
             <div key={t} style={{ padding: "9px 12px", fontSize: 13.5, color: "#5d7da6" }}>{t}</div>
@@ -139,10 +141,12 @@ export default function Workspace({ ctx, email, onSignOut }) {
                 : page === "calendar"
                   ? <Calendar onOpen={(id) => setSelectedId(id)} />
                   : page === "quotes"
-                    ? <QuotesCalculator firm={firm} />
+                    ? <QuotesCalculator firm={firm} onEditFees={() => go("feesetup")} />
                     : page === "deadlinesetup"
                       ? <DeadlineSetup firmId={firm.id} />
-                      : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
+                      : page === "feesetup"
+                        ? <FeeSetup firmId={firm.id} />
+                        : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
         </main>
       </div>
 
@@ -646,7 +650,7 @@ function DeadlineSetup({ firmId }) {
 }
 
 /* ---------------- Quotes calculator (Phase 3.3a, on-screen) ---------------- */
-function QuotesCalculator({ firm }) {
+function QuotesCalculator({ firm, onEditFees }) {
   const states = Object.keys(STATE_RATES);
   const def = states.includes(firm && firm.default_state) ? firm.default_state : "NJ";
   const [state, setState] = useState(def);
@@ -656,6 +660,17 @@ function QuotesCalculator({ firm }) {
   const [prior, setPrior] = useState("");
   const [exemption, setExemption] = useState("none");
   const [propClass, setPropClass] = useState("");
+  const [fees, setFees] = useState([]); // [{id,name,amount,include}] — editable per quote
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const f = await listFeeLines();
+        setFees(f.filter((x) => x.active !== false).map((x) => ({ id: x.id, name: x.name, amount: Number(x.amount) || 0, include: true })));
+      } catch (e) { /* ignore */ }
+    })();
+  }, []);
+  const setFee = (id, patch) => setFees((p) => p.map((f) => f.id === id ? { ...f, ...patch } : f));
 
   const onState = (s) => { setState(s); setPtype(STATE_RATES[s].types[0]); };
   const num = (s) => Number(String(s || "").replace(/[^\d.]/g, "")) || 0;
@@ -666,7 +681,8 @@ function QuotesCalculator({ firm }) {
   const rtf = useMemo(() => isNJ ? calcRTF(num(price), exemption) : null, [isNJ, price, exemption]);
   const gpf = useMemo(() => isNJ ? calcGPF(num(price), propClass) : null, [isNJ, price, propClass]);
   const transfer = ((rtf && rtf.amount) || 0) + ((gpf && gpf.amount) || 0);
-  const total = (q.premium || 0) + (q.search || 0) + transfer;
+  const feesTotal = fees.filter((f) => f.include).reduce((s, f) => s + (Number(f.amount) || 0), 0);
+  const total = (q.premium || 0) + (q.search || 0) + transfer + feesTotal;
 
   const fld = { border: `1px solid ${LINE}`, borderRadius: 9, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box" };
   const lbl = { fontSize: 11.5, color: MUTED, fontWeight: 600, marginBottom: 4, display: "block" };
@@ -705,9 +721,76 @@ function QuotesCalculator({ firm }) {
             <Line label={`Realty Transfer Fee${rtf && rtf.rateTable ? ` · ${rtf.rateTable}` : ""}`} amount={rtf ? rtf.amount : 0} />
             {gpf && gpf.amount > 0 && <Line label={`Graduated Percent Fee · ${gpf.bracketLabel}`} amount={gpf.amount} />}
           </>}
+          <div style={sectionLabel}>Firm fees</div>
+          {fees.length === 0
+            ? <div style={{ fontSize: 12, color: MUTED, padding: "7px 0", borderTop: "1px solid #eef1f6" }}>No fee lines yet. <span onClick={onEditFees} style={{ color: BL, fontWeight: 600, cursor: "pointer" }}>Set up your fees →</span></div>
+            : fees.map((f) => (
+              <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderTop: "1px solid #eef1f6" }}>
+                <input type="checkbox" checked={f.include} onChange={(e) => setFee(f.id, { include: e.target.checked })} style={{ width: 15, height: 15, cursor: "pointer", flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: f.include ? "#0f172a" : "#9ca3af" }}>{f.name}</span>
+                <span style={{ fontSize: 13, color: MUTED }}>$</span>
+                <input value={f.amount} onChange={(e) => setFee(f.id, { amount: Number(String(e.target.value).replace(/[^\d.]/g, "")) || 0 })} style={{ width: 84, textAlign: "right", border: `1px solid ${LINE}`, borderRadius: 7, padding: "5px 8px", fontSize: 12.5, fontFamily: "inherit", outline: "none" }} />
+              </div>
+            ))}
+          {fees.length > 0 && <div style={{ textAlign: "right", marginTop: 6 }}><span onClick={onEditFees} style={{ fontSize: 11.5, color: BL, fontWeight: 600, cursor: "pointer" }}>Edit fee schedule →</span></div>}
+
           <Line label="Estimated total" amount={total} strong />
         </div>
         <div style={{ fontSize: 11, color: MUTED, marginTop: 12 }}>Estimate only — figures use Lakeland's current filed rates. Recording fees and firm charges aren't included yet (coming in 3.3b).</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Quote fee setup (firm fee schedule) ---------------- */
+function FeeSetup({ firmId }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => { setLoading(true); try { setRows(await listFeeLines()); } catch (e) { console.error(e); } setLoading(false); };
+  useEffect(() => { load(); }, []);
+
+  const addRow = async () => { setBusy(true); try { await createFeeLine(firmId, { name: "New fee", amount: 0, sort_order: rows.length }); await load(); } catch (e) { alert(e.message || String(e)); } setBusy(false); };
+  const seed = async () => { setBusy(true); try { await seedDefaultFees(firmId); await load(); } catch (e) { alert(e.message || String(e)); } setBusy(false); };
+  const patch = async (id, p) => { setRows((prev) => prev.map((r) => r.id === id ? { ...r, ...p } : r)); try { await updateFeeLine(id, p); } catch (e) { load(); } };
+  const remove = async (r) => { if (!window.confirm(`Remove "${r.name}"?`)) return; try { await deleteFeeLine(r.id); await load(); } catch (e) { alert(e.message || String(e)); } };
+
+  const inp = { border: `1px solid ${LINE}`, borderRadius: 8, padding: "7px 9px", fontSize: 13, fontFamily: "inherit", outline: "none" };
+
+  return (
+    <div style={{ maxWidth: 620 }}>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: BL, fontWeight: 600 }}>Settings</div>
+        <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Quote fees</div>
+        <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Your firm's own charges. These load into every quote on top of Lakeland's premium and transfer tax, and stay editable per quote.</div>
+      </div>
+      <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 6 }}>
+        {loading ? <div style={{ padding: 22, color: "#9ca3af", fontSize: 13 }}>Loading…</div>
+          : rows.length === 0
+            ? <div style={{ padding: "26px 18px", textAlign: "center" }}>
+              <div style={{ color: MUTED, fontSize: 13, marginBottom: 12 }}>No fees set up yet.</div>
+              <button onClick={seed} disabled={busy} style={{ padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer", marginRight: 8 }}>Load starter set</button>
+              <button onClick={addRow} disabled={busy} style={{ padding: "9px 16px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ Add one</button>
+            </div>
+            : <div>
+              <div style={{ display: "flex", gap: 8, padding: "8px 12px", fontSize: 11, color: MUTED, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em" }}>
+                <div style={{ flex: 1 }}>Fee</div><div style={{ width: 140 }}>Default amount</div><div style={{ width: 28 }} />
+              </div>
+              {rows.map((r) => (
+                <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 12px", borderTop: "1px solid #eef1f6" }}>
+                  <input value={r.name} onChange={(e) => patch(r.id, { name: e.target.value })} style={{ ...inp, flex: 1 }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, width: 140 }}>
+                    <span style={{ color: MUTED, fontSize: 13 }}>$</span>
+                    <input type="number" value={r.amount} onChange={(e) => patch(r.id, { amount: Number(e.target.value) || 0 })} style={{ ...inp, flex: 1, width: "100%" }} />
+                  </div>
+                  <button onClick={() => remove(r)} title="Remove" style={{ padding: "6px 9px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>✕</button>
+                </div>
+              ))}
+              <div style={{ padding: "10px 12px" }}>
+                <button onClick={addRow} disabled={busy} style={{ fontSize: 12.5, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer", padding: 0 }}>＋ Add fee</button>
+              </div>
+            </div>}
       </div>
     </div>
   );
