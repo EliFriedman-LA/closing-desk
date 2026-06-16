@@ -12,6 +12,7 @@ import {
 import Contacts from "./PartnerContacts.jsx";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
+import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile } from "./partnerDb.js";
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0", FIRM_DEFAULT = "#0f5132";
 
@@ -107,8 +108,9 @@ export default function Workspace({ ctx, email, onSignOut }) {
           {navItem("contacts", "Contacts", "◍")}
           {navItem("deadlinesetup", "Deadline setup", "◷")}
           {navItem("feesetup", "Quote fees", "◇")}
+          {navItem("doctemplates", "Doc templates", "❏")}
           <div style={{ fontSize: 10, letterSpacing: ".09em", textTransform: "uppercase", color: "#6f93bb", padding: "16px 12px 6px", fontWeight: 600 }}>Coming soon</div>
-          {["▣ Calendar", "✉ Smart Inbox", "▥ Documents"].map((t) => (
+          {["✉ Smart Inbox", "✶ AI contract import"].map((t) => (
             <div key={t} style={{ padding: "9px 12px", fontSize: 13.5, color: "#5d7da6" }}>{t}</div>
           ))}
         </nav>
@@ -146,7 +148,9 @@ export default function Workspace({ ctx, email, onSignOut }) {
                       ? <DeadlineSetup firmId={firm.id} />
                       : page === "feesetup"
                         ? <FeeSetup firmId={firm.id} />
-                        : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
+                        : page === "doctemplates"
+                          ? <DocTemplates firmId={firm.id} />
+                          : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
         </main>
       </div>
 
@@ -380,6 +384,8 @@ function MatterDetail({ matter, email, onBack, onStage, onDelete, onRefresh, onR
           </div>
         )}
       </div>
+
+      <PartiesPanel matter={matter} onRefresh={onRefresh} />
 
       <DeadlinesPanel matter={matter} onRefresh={onRefresh} />
 
@@ -791,6 +797,197 @@ function FeeSetup({ firmId }) {
                 <button onClick={addRow} disabled={busy} style={{ fontSize: 12.5, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer", padding: 0 }}>＋ Add fee</button>
               </div>
             </div>}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Parties (durable, feeds doc merge) ---------------- */
+function PartiesPanel({ matter, onRefresh }) {
+  const [buyer, setBuyer] = useState(matter.buyer_name || "");
+  const [seller, setSeller] = useState(matter.seller_name || "");
+  const [lender, setLender] = useState(matter.lender_name || "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setBuyer(matter.buyer_name || ""); setSeller(matter.seller_name || ""); setLender(matter.lender_name || "");
+  }, [matter.id]);
+
+  const dirty = buyer !== (matter.buyer_name || "") || seller !== (matter.seller_name || "") || lender !== (matter.lender_name || "");
+  const save = async () => {
+    setSaving(true); setSaved(false);
+    try {
+      await updateMatter(matter.id, { buyer_name: buyer.trim() || null, seller_name: seller.trim() || null, lender_name: lender.trim() || null });
+      onRefresh && onRefresh(); setSaved(true); setTimeout(() => setSaved(false), 1800);
+    } catch (e) { alert(e.message || String(e)); }
+    setSaving(false);
+  };
+
+  const inp = { width: "100%", padding: "9px 11px", border: `1px solid ${LINE}`, borderRadius: 9, fontSize: 13.5, fontFamily: "inherit", outline: "none", boxSizing: "border-box" };
+  const lbl = { fontSize: 11.5, color: MUTED, fontWeight: 600, marginBottom: 4, display: "block" };
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16, maxWidth: 420 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Parties</div>
+        <div style={{ fontSize: 11.5, color: MUTED }}>Fills your generated documents</div>
+      </div>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div><label style={lbl}>Buyer / borrower</label><input style={inp} value={buyer} onChange={(e) => setBuyer(e.target.value)} placeholder="Full name(s)" /></div>
+        <div><label style={lbl}>Seller</label><input style={inp} value={seller} onChange={(e) => setSeller(e.target.value)} placeholder="Full name(s)" /></div>
+        <div><label style={lbl}>Lender</label><input style={inp} value={lender} onChange={(e) => setLender(e.target.value)} placeholder="Lender name" /></div>
+      </div>
+      <div style={{ marginTop: 13, display: "flex", alignItems: "center", gap: 10 }}>
+        <button onClick={save} disabled={!dirty || saving} style={{ padding: "8px 15px", background: dirty ? BL : "#cbd5e1", color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: dirty ? "pointer" : "default" }}>{saving ? "Saving…" : "Save parties"}</button>
+        {saved && <span style={{ fontSize: 12.5, color: "#16a34a", fontWeight: 600 }}>Saved ✓</span>}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Doc templates (Phase 3.2a authoring) ---------------- */
+const DOC_TOKENS = [
+  "firm_name", "buyer", "seller", "lender",
+  "property_address", "town", "state",
+  "file_number", "lakeland_file_number", "transaction_type",
+  "contract_date", "closing_date", "title_company", "today"
+];
+const STARTER_BODY = [
+  "{{firm_name}}",
+  "{{today}}",
+  "",
+  "RE: {{property_address}}, {{town}}, {{state}}",
+  "File No.: {{file_number}}",
+  "",
+  "To Whom It May Concern:",
+  "",
+  "This letter concerns the above-referenced {{transaction_type}} between buyer {{buyer}} and seller {{seller}}, scheduled to close on {{closing_date}}. Title is being placed with {{title_company}}.",
+  "",
+  "Sincerely,",
+  "",
+  "{{firm_name}}"
+].join("\n");
+
+function DocTemplates({ firmId }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const fileRef = useRef(null);
+
+  const load = async () => { setLoading(true); try { setRows(await listDocTemplates()); } catch (e) { console.error(e); } setLoading(false); };
+  useEffect(() => { load(); }, []);
+
+  const newEditor = async () => {
+    setBusy(true);
+    try {
+      const t = await createDocTemplate(firmId, { name: "Untitled template", source_type: "editor", body: STARTER_BODY, sort_order: rows.length });
+      await load(); setEditing(t);
+    } catch (e) { alert(e.message || String(e)); }
+    setBusy(false);
+  };
+  const onUpload = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (fileRef.current) fileRef.current.value = "";
+    if (!file) return;
+    if (!/\.docx$/i.test(file.name)) { alert("Please upload a Word .docx file."); return; }
+    setBusy(true);
+    try {
+      const path = await uploadDocTemplateFile(firmId, file);
+      await createDocTemplate(firmId, { name: file.name.replace(/\.docx$/i, ""), source_type: "docx", storage_path: path, sort_order: rows.length });
+      await load();
+    } catch (e) { alert(e.message || String(e)); }
+    setBusy(false);
+  };
+  const rename = async (t, name) => { setRows((p) => p.map((r) => r.id === t.id ? { ...r, name } : r)); try { await updateDocTemplate(t.id, { name }); } catch (e) { load(); } };
+  const remove = async (t) => { if (!window.confirm(`Delete "${t.name}"?`)) return; try { await deleteDocTemplate(t); await load(); } catch (e) { alert(e.message || String(e)); } };
+
+  return (
+    <div style={{ maxWidth: 680 }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: BL, fontWeight: 600 }}>Settings</div>
+        <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Doc templates</div>
+        <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Your firm's own templates. Write one here with merge fields, or upload a Word file with the same fields. You'll generate filled documents from any matter (coming next).</div>
+      </div>
+
+      <div style={{ background: "#f8fafc", border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
+        <div style={{ fontSize: 11.5, color: MUTED, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>Merge fields you can use</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {DOC_TOKENS.map((t) => (
+            <code key={t} style={{ fontSize: 11.5, background: "#fff", border: `1px solid ${LINE}`, borderRadius: 6, padding: "3px 7px", color: NV }}>{`{{${t}}}`}</code>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+        <button onClick={newEditor} disabled={busy} style={{ padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ New editor template</button>
+        <button onClick={() => fileRef.current && fileRef.current.click()} disabled={busy} style={{ padding: "9px 16px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer", color: NV }}>⤓ Upload .docx</button>
+        <input ref={fileRef} type="file" accept=".docx" onChange={onUpload} style={{ display: "none" }} />
+      </div>
+
+      <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 6 }}>
+        {loading ? <div style={{ padding: 22, color: "#9ca3af", fontSize: 13 }}>Loading…</div>
+          : rows.length === 0
+            ? <div style={{ padding: "26px 18px", textAlign: "center", color: MUTED, fontSize: 13 }}>No templates yet. Create one above.</div>
+            : rows.map((t) => (
+              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderTop: "1px solid #eef1f6" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 20, background: t.source_type === "docx" ? "#eef2ff" : "#e8f3ff", color: t.source_type === "docx" ? "#4338ca" : "#0f6fd1", flexShrink: 0 }}>{t.source_type === "docx" ? "WORD" : "EDITOR"}</span>
+                <input value={t.name} onChange={(e) => rename(t, e.target.value)} style={{ flex: 1, minWidth: 0, border: "1px solid transparent", borderRadius: 7, padding: "6px 8px", fontSize: 13.5, fontWeight: 600, fontFamily: "inherit", outline: "none", color: NV }} onFocus={(e) => e.target.style.border = `1px solid ${LINE}`} onBlur={(e) => e.target.style.border = "1px solid transparent"} />
+                {t.source_type === "editor" && <button onClick={() => setEditing(t)} style={{ padding: "6px 12px", background: "#f1f5f9", border: "none", borderRadius: 7, fontSize: 12.5, fontWeight: 600, color: NV, cursor: "pointer" }}>Edit</button>}
+                <button onClick={() => remove(t)} title="Delete" style={{ padding: "6px 9px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>✕</button>
+              </div>
+            ))}
+      </div>
+
+      {editing && <TemplateEditorModal template={editing} onClose={() => setEditing(null)} onSaved={load} />}
+    </div>
+  );
+}
+
+function TemplateEditorModal({ template, onClose, onSaved }) {
+  const [name, setName] = useState(template.name || "");
+  const [body, setBody] = useState(template.body || "");
+  const [saving, setSaving] = useState(false);
+  const taRef = useRef(null);
+
+  const insert = (tok) => {
+    const el = taRef.current;
+    const token = `{{${tok}}}`;
+    if (!el) { setBody((b) => b + token); return; }
+    const s = el.selectionStart || 0, e = el.selectionEnd || 0;
+    const next = body.slice(0, s) + token + body.slice(e);
+    setBody(next);
+    requestAnimationFrame(() => { el.focus(); const pos = s + token.length; el.setSelectionRange(pos, pos); });
+  };
+  const save = async () => {
+    setSaving(true);
+    try { await updateDocTemplate(template.id, { name: name.trim() || "Untitled template", body }); onSaved && onSaved(); }
+    catch (err) { alert(err.message || String(err)); setSaving(false); return; }
+    setSaving(false); onClose();
+  };
+
+  return (
+    <div onClick={(e) => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, zIndex: 60 }}>
+      <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 720, maxHeight: "92vh", overflow: "auto", boxShadow: "0 12px 40px rgba(16,24,40,.2)" }}>
+        <div style={{ padding: "16px 20px", borderBottom: `1px solid ${LINE}`, display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: "#fff" }}>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Template name" style={{ flex: 1, border: "none", outline: "none", fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 18, color: NV }} />
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, color: "#9ca3af", cursor: "pointer" }}>×</button>
+        </div>
+        <div style={{ padding: 20 }}>
+          <div style={{ fontSize: 11.5, color: MUTED, fontWeight: 600, marginBottom: 7 }}>Insert a field at the cursor:</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+            {DOC_TOKENS.map((t) => (
+              <button key={t} onClick={() => insert(t)} style={{ fontSize: 11.5, background: "#f1f5f9", border: `1px solid ${LINE}`, borderRadius: 6, padding: "4px 8px", color: NV, cursor: "pointer", fontFamily: "inherit" }}>{`{{${t}}}`}</button>
+            ))}
+          </div>
+          <textarea ref={taRef} value={body} onChange={(e) => setBody(e.target.value)} rows={18} style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${LINE}`, borderRadius: 10, padding: "12px 14px", fontSize: 13.5, lineHeight: 1.6, fontFamily: "ui-monospace, Menlo, Consolas, monospace", outline: "none", resize: "vertical" }} />
+          <div style={{ fontSize: 11.5, color: MUTED, marginTop: 8 }}>Blank lines become paragraph breaks. Any field left empty on a matter is simply blank in the document.</div>
+        </div>
+        <div style={{ padding: "14px 20px", borderTop: `1px solid ${LINE}`, display: "flex", justifyContent: "flex-end", gap: 10, position: "sticky", bottom: 0, background: "#fff" }}>
+          <button onClick={onClose} style={{ padding: "9px 16px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer", color: NV }}>Cancel</button>
+          <button onClick={save} disabled={saving} style={{ padding: "9px 18px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>{saving ? "Saving…" : "Save template"}</button>
+        </div>
       </div>
     </div>
   );

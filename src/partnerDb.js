@@ -302,3 +302,47 @@ export async function seedDefaultFees(firmId) {
   if (error) throw error;
   return data || [];
 }
+
+/* ---------------- Doc templates (Phase 3.2) ---------------- */
+export async function listDocTemplates() {
+  const { data, error } = await supabase.from("firm_doc_templates")
+    .select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+export async function createDocTemplate(firmId, payload) {
+  const { data, error } = await supabase.from("firm_doc_templates")
+    .insert({ firm_id: firmId, ...payload }).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function updateDocTemplate(id, patch) {
+  const { data, error } = await supabase.from("firm_doc_templates")
+    .update(patch).eq("id", id).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function deleteDocTemplate(tpl) {
+  if (tpl.storage_path) {
+    try { await supabase.storage.from("doc-templates").remove([tpl.storage_path]); } catch (e) { /* ignore */ }
+  }
+  const { error } = await supabase.from("firm_doc_templates").delete().eq("id", tpl.id);
+  if (error) throw error;
+}
+// Upload a .docx template to the firm-scoped doc-templates bucket; returns the storage path.
+export async function uploadDocTemplateFile(firmId, file) {
+  const safe = (file.name || "template.docx").replace(/[^\w.\-]+/g, "_");
+  const path = `${firmId}/${crypto.randomUUID()}-${safe}`;
+  const up = await supabase.storage.from("doc-templates").upload(path, file, {
+    contentType: file.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    upsert: false
+  });
+  if (up.error) throw up.error;
+  return path;
+}
+// Download a stored .docx template as an ArrayBuffer (used by the generator in 3.2b).
+export async function downloadDocTemplateFile(path) {
+  const { data, error } = await supabase.storage.from("doc-templates").download(path);
+  if (error) throw error;
+  return await data.arrayBuffer();
+}
