@@ -100,3 +100,36 @@ export async function cancelOrderRequest(id) {
   const { error } = await supabase.from("order_requests").update({ status: "canceled" }).eq("id", id);
   if (error) throw error;
 }
+
+/* ---------------- Document exchange (Phase 2.3) ---------------- */
+export async function listDocuments(matterId) {
+  const { data, error } = await supabase
+    .from("file_documents").select("*").eq("matter_id", matterId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+export async function uploadDocument(firmId, matter, file) {
+  const safe = (file.name || "file").replace(/[^\w.\-]+/g, "_");
+  const path = `${firmId}/${matter.id}/${crypto.randomUUID()}-${safe}`;
+  const up = await supabase.storage.from("file-docs").upload(path, file, {
+    contentType: file.type || "application/octet-stream", upsert: false
+  });
+  if (up.error) throw up.error;
+  const { data, error } = await supabase.from("file_documents").insert({
+    matter_id: matter.id, firm_id: firmId, file_number: matter.lakeland_file_number || null,
+    side: "firm", name: file.name, storage_path: path, size: file.size, content_type: file.type || null
+  }).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function documentUrl(path) {
+  const { data, error } = await supabase.storage.from("file-docs").createSignedUrl(path, 120);
+  if (error) throw error;
+  return data.signedUrl;
+}
+export async function deleteDocument(doc) {
+  await supabase.storage.from("file-docs").remove([doc.storage_path]);
+  const { error } = await supabase.from("file_documents").delete().eq("id", doc.id);
+  if (error) throw error;
+}

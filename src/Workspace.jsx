@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import {
   listMatters, createMatter, updateMatter, deleteMatter,
   linkLakelandMatter, getLakelandStatus,
   createOrderRequest, getMatterRequest, cancelOrderRequest,
+  listDocuments, uploadDocument, documentUrl, deleteDocument,
   TX_TYPES, STATES, STAGES
 } from "./db.js";
 import Contacts from "./Contacts.jsx";
@@ -356,8 +357,79 @@ function MatterDetail({ matter, onBack, onStage, onDelete, onRefresh }) {
         )}
       </div>
 
+      <DocumentsPanel matter={matter} />
+
       {showConnect && <ConnectModal matter={matter} onClose={() => setShowConnect(false)} onLinked={() => { setShowConnect(false); onRefresh && onRefresh(); }} />}
       {showPlace && <PlaceOrderModal matter={matter} onClose={() => setShowPlace(false)} onPlaced={async () => { setShowPlace(false); const r = await getMatterRequest(matter.id); setRequest(r); }} />}
+    </div>
+  );
+}
+
+/* ---------------- Documents panel ---------------- */
+function DocumentsPanel({ matter }) {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const inputRef = useRef(null);
+
+  const load = async () => {
+    setLoading(true);
+    try { setDocs(await listDocuments(matter.id)); } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [matter.id]);
+
+  const onPick = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (inputRef.current) inputRef.current.value = "";
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) { setErr("Files must be 25 MB or smaller."); return; }
+    setBusy(true); setErr("");
+    try { await uploadDocument(matter.firm_id, matter, file); await load(); }
+    catch (e2) { setErr(e2.message || String(e2)); }
+    setBusy(false);
+  };
+  const open = async (doc) => {
+    try { const url = await documentUrl(doc.storage_path); window.open(url, "_blank", "noopener"); }
+    catch (e) { setErr("Couldn't open the file."); }
+  };
+  const remove = async (doc) => {
+    if (!window.confirm(`Delete "${doc.name}"?`)) return;
+    try { await deleteDocument(doc); await load(); } catch (e) { setErr(e.message || String(e)); }
+  };
+
+  const fmtSize = (n) => !n ? "" : n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(0) + " KB" : (n / 1048576).toFixed(1) + " MB";
+  const fmtDate = (s) => { try { return new Date(s).toLocaleDateString(); } catch { return ""; } };
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16, maxWidth: 560 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, gap: 10 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Documents</div>
+        <input ref={inputRef} type="file" onChange={onPick} style={{ display: "none" }} />
+        <button onClick={() => inputRef.current && inputRef.current.click()} disabled={busy} style={{ padding: "7px 13px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>{busy ? "Uploading…" : "⬆ Upload"}</button>
+      </div>
+      <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 10 }}>
+        {matter.lakeland_file_number ? "Shared with Lakeland on this file. They can see what you upload, and you'll see what they share." : "Your files for this matter. They'll be shared with Lakeland once this matter is connected to a file."}
+      </div>
+      {err && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 8 }}>{err}</div>}
+
+      {loading ? <div style={{ fontSize: 12.5, color: "#9ca3af" }}>Loading…</div>
+        : docs.length === 0 ? <div style={{ fontSize: 12.5, color: "#9ca3af", padding: "8px 0" }}>No documents yet.</div>
+        : <div style={{ display: "flex", flexDirection: "column" }}>
+          {docs.map((d) => (
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: "1px solid #eef1f6" }}>
+              <div style={{ fontSize: 18, flexShrink: 0 }}>📄</div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div onClick={() => open(d)} style={{ fontSize: 13, fontWeight: 600, color: NV, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                <div style={{ fontSize: 11, color: MUTED }}>{[fmtSize(d.size), fmtDate(d.created_at)].filter(Boolean).join(" · ")}</div>
+              </div>
+              <span style={d.side === "lakeland" ? tag("#e8f3ff", "#0f6fd1") : tag("#f1f5f9", "#475569")}>{d.side === "lakeland" ? "Lakeland" : "You"}</span>
+              <button onClick={() => open(d)} style={{ padding: "5px 10px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 6, fontSize: 11.5, fontWeight: 500, cursor: "pointer" }}>Open</button>
+              {d.side === "firm" && <button onClick={() => remove(d)} title="Delete" style={{ padding: "5px 8px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 11.5, cursor: "pointer" }}>✕</button>}
+            </div>
+          ))}
+        </div>}
     </div>
   );
 }

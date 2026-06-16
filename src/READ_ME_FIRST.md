@@ -1,27 +1,23 @@
-# Phase 2.2a — Place a title order (attorney side)
+# Phase 2.3a — Document exchange (attorney side)
 
-Run the Phase 2.2a SQL FIRST (order_requests table), then upload into the
-**closing-desk** repo's `src/` folder:
+Run the Phase 2.3 SQL FIRST (bucket + file_documents + storage policies), then
+upload into the **closing-desk** repo's `src/` folder:
 
 - `Workspace.jsx` → replace
 - `db.js`         → replace
 
-No styles / env changes.
+No env changes.
 
-## What you get (attorney side)
-On a Lakeland matter that isn't connected yet, the tracker footer now shows TWO
-options:
-- **◆ Connect existing file** — link to a file Lakeland already opened (2.1).
-- **Place title order** — send a new file to Lakeland to open. Opens a form
-  prefilled from the matter (address, town, state, type + buyer/seller/lender/
-  notes). Submitting creates a pending request.
-
-After placing: the matter shows **"Order placed — pending Lakeland review"**
-(with a Cancel link). When your staff accept it (built in 2.2b), the matter
-auto-connects and goes live.
+## What you get
+- A **Documents** panel on every matter detail: ⬆ Upload, list, Open (opens via
+  a short-lived signed URL), and delete-your-own.
+- Files are stored privately, scoped to your firm — another firm can't see them.
+- On a matter connected to a Lakeland file, the docs are shared on that file:
+  Lakeland will see what you upload, and you'll see what they share (the staff
+  side of that is 2.3b). Each doc is tagged **You** or **Lakeland**.
+- Up to 25 MB per file.
 
 ## Test
-- Make a Lakeland matter → open it → **Place title order** → submit.
-- It flips to "pending review." Check Supabase → `order_requests` has the row
-  (status = pending). 2.2b adds the staff-side Accept that turns it into a real
-  file and links the matter.
+- Open a matter → Documents → Upload a PDF → it lists, tagged "You".
+- Click Open → it opens in a new tab. Delete with the ✕.
+- (Full two-way exchange — Lakeland uploading back — comes in 2.3b.)
