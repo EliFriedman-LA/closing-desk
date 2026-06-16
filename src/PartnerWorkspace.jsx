@@ -10,6 +10,7 @@ import {
   TX_TYPES, STATES, STAGES
 } from "./partnerDb.js";
 import Contacts from "./PartnerContacts.jsx";
+import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0", FIRM_DEFAULT = "#0f5132";
 
@@ -101,6 +102,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
           {navItem("dashboard", "Dashboard", "▦")}
           {navItem("matters", "Matters", "▤")}
           {navItem("calendar", "Calendar", "▥")}
+          {navItem("quotes", "Quotes", "◈")}
           {navItem("contacts", "Contacts", "◍")}
           {navItem("deadlinesetup", "Deadline setup", "◷")}
           <div style={{ fontSize: 10, letterSpacing: ".09em", textTransform: "uppercase", color: "#6f93bb", padding: "16px 12px 6px", fontWeight: 600 }}>Coming soon</div>
@@ -136,9 +138,11 @@ export default function Workspace({ ctx, email, onSignOut }) {
                 ? <Contacts firmId={firm.id} />
                 : page === "calendar"
                   ? <Calendar onOpen={(id) => setSelectedId(id)} />
-                  : page === "deadlinesetup"
-                    ? <DeadlineSetup firmId={firm.id} />
-                    : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
+                  : page === "quotes"
+                    ? <QuotesCalculator firm={firm} />
+                    : page === "deadlinesetup"
+                      ? <DeadlineSetup firmId={firm.id} />
+                      : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
         </main>
       </div>
 
@@ -637,6 +641,74 @@ function DeadlineSetup({ firmId }) {
             </div>}
       </div>
       <div style={{ fontSize: 11.5, color: MUTED, marginTop: 10 }}>Tip: a negative offset means “before” the anchor (e.g. Closing −3 = three days before closing). Positive means after.</div>
+    </div>
+  );
+}
+
+/* ---------------- Quotes calculator (Phase 3.3a, on-screen) ---------------- */
+function QuotesCalculator({ firm }) {
+  const states = Object.keys(STATE_RATES);
+  const def = states.includes(firm && firm.default_state) ? firm.default_state : "NJ";
+  const [state, setState] = useState(def);
+  const [ptype, setPtype] = useState(STATE_RATES[def].types[0]);
+  const [price, setPrice] = useState("");
+  const [loan, setLoan] = useState("");
+  const [prior, setPrior] = useState("");
+  const [exemption, setExemption] = useState("none");
+  const [propClass, setPropClass] = useState("");
+
+  const onState = (s) => { setState(s); setPtype(STATE_RATES[s].types[0]); };
+  const num = (s) => Number(String(s || "").replace(/[^\d.]/g, "")) || 0;
+  const isNJ = state === "NJ";
+  const isRefi = /refi|refinance|non-sale/i.test(ptype);
+
+  const q = useMemo(() => quotePremium(state, ptype, { price: num(price), loan: num(loan), prior: num(prior) }), [state, ptype, price, loan, prior]);
+  const rtf = useMemo(() => isNJ ? calcRTF(num(price), exemption) : null, [isNJ, price, exemption]);
+  const gpf = useMemo(() => isNJ ? calcGPF(num(price), propClass) : null, [isNJ, price, propClass]);
+  const transfer = ((rtf && rtf.amount) || 0) + ((gpf && gpf.amount) || 0);
+  const total = (q.premium || 0) + (q.search || 0) + transfer;
+
+  const fld = { border: `1px solid ${LINE}`, borderRadius: 9, padding: "9px 11px", fontSize: 13.5, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box" };
+  const lbl = { fontSize: 11.5, color: MUTED, fontWeight: 600, marginBottom: 4, display: "block" };
+  const sectionLabel = { fontSize: 11.5, color: MUTED, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em", margin: "12px 0 2px" };
+  const Line = ({ label, amount, strong, muted }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", borderTop: "1px solid #eef1f6", fontSize: strong ? 14.5 : 13, fontWeight: strong ? 700 : 500, color: muted ? MUTED : "#0f172a" }}>
+      <span>{label}</span><span>{amount == null ? "" : money(amount)}</span>
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: BL, fontWeight: 600 }}>Tools</div>
+        <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Quotes</div>
+        <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Instant title-premium and transfer-tax estimate, using Lakeland's filed rates.</div>
+      </div>
+
+      <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div><label style={lbl}>State</label><select value={state} onChange={(e) => onState(e.target.value)} style={fld}>{states.map((s) => <option key={s}>{s}</option>)}</select></div>
+          <div><label style={lbl}>Policy type</label><select value={ptype} onChange={(e) => setPtype(e.target.value)} style={fld}>{STATE_RATES[state].types.map((t) => <option key={t}>{t}</option>)}</select></div>
+          <div><label style={lbl}>Purchase price / owner coverage</label><input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="$" style={fld} /></div>
+          <div><label style={lbl}>Loan amount</label><input value={loan} onChange={(e) => setLoan(e.target.value)} placeholder="$" style={fld} /></div>
+          {isNJ && isRefi && <div><label style={lbl}>Prior owner's coverage</label><input value={prior} onChange={(e) => setPrior(e.target.value)} placeholder="$" style={fld} /></div>}
+          {isNJ && <div><label style={lbl}>RTF exemption</label><select value={exemption} onChange={(e) => setExemption(e.target.value)} style={fld}>{SIMPLE_EXEMPTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div>}
+          {isNJ && <div><label style={lbl}>Property class (GPF over $1M)</label><select value={propClass} onChange={(e) => setPropClass(e.target.value)} style={fld}>{PROPERTY_CLASS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div>}
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <div style={{ ...sectionLabel, marginTop: 0 }}>Title premium</div>
+          {q.lines && q.lines.length ? q.lines.map((l, i) => <Line key={i} label={l.label} amount={l.amount} muted={l.amount == null} />) : <Line label="Enter amounts above" amount={null} muted />}
+          {q.search > 0 && <Line label="Search & exam fee" amount={q.search} />}
+          {isNJ && <>
+            <div style={sectionLabel}>Transfer tax (NJ)</div>
+            <Line label={`Realty Transfer Fee${rtf && rtf.rateTable ? ` · ${rtf.rateTable}` : ""}`} amount={rtf ? rtf.amount : 0} />
+            {gpf && gpf.amount > 0 && <Line label={`Graduated Percent Fee · ${gpf.bracketLabel}`} amount={gpf.amount} />}
+          </>}
+          <Line label="Estimated total" amount={total} strong />
+        </div>
+        <div style={{ fontSize: 11, color: MUTED, marginTop: 12 }}>Estimate only — figures use Lakeland's current filed rates. Recording fees and firm charges aren't included yet (coming in 3.3b).</div>
+      </div>
     </div>
   );
 }
