@@ -6,7 +6,7 @@ import {
   listDocuments, uploadDocument, documentUrl, deleteDocument,
   listMessages, postMessage, markRead, listUnreads,
   listDeadlineTemplates, createDeadlineTemplate, updateDeadlineTemplate, deleteDeadlineTemplate, seedDefaultTemplates,
-  listMatterDeadlines, createMatterDeadline, updateMatterDeadline, deleteMatterDeadline, generateDeadlines, DEADLINE_ANCHORS,
+  listMatterDeadlines, createMatterDeadline, updateMatterDeadline, deleteMatterDeadline, generateDeadlines, DEADLINE_ANCHORS, listFirmDeadlines,
   TX_TYPES, STATES, STAGES
 } from "./partnerDb.js";
 import Contacts from "./PartnerContacts.jsx";
@@ -100,6 +100,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
         <nav style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
           {navItem("dashboard", "Dashboard", "▦")}
           {navItem("matters", "Matters", "▤")}
+          {navItem("calendar", "Calendar", "▥")}
           {navItem("contacts", "Contacts", "◍")}
           {navItem("deadlinesetup", "Deadline setup", "◷")}
           <div style={{ fontSize: 10, letterSpacing: ".09em", textTransform: "uppercase", color: "#6f93bb", padding: "16px 12px 6px", fontWeight: 600 }}>Coming soon</div>
@@ -133,9 +134,11 @@ export default function Workspace({ ctx, email, onSignOut }) {
               ? <Dashboard firm={firm} org={org} accent={accent} initials={initials} openCount={openCount} lakelandCount={lakelandCount} total={matters.length} recent={matters.slice(0, 5)} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} />
               : page === "contacts"
                 ? <Contacts firmId={firm.id} />
-                : page === "deadlinesetup"
-                  ? <DeadlineSetup firmId={firm.id} />
-                  : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
+                : page === "calendar"
+                  ? <Calendar onOpen={(id) => setSelectedId(id)} />
+                  : page === "deadlinesetup"
+                    ? <DeadlineSetup firmId={firm.id} />
+                    : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
         </main>
       </div>
 
@@ -634,6 +637,131 @@ function DeadlineSetup({ firmId }) {
             </div>}
       </div>
       <div style={{ fontSize: 11.5, color: MUTED, marginTop: 10 }}>Tip: a negative offset means “before” the anchor (e.g. Closing −3 = three days before closing). Positive means after.</div>
+    </div>
+  );
+}
+
+/* ---------------- Calendar / agenda (Phase 3.1b) ---------------- */
+function Calendar({ onOpen }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState("agenda"); // agenda | month
+  const [showDone, setShowDone] = useState(false);
+  const [cursor, setCursor] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; });
+  const [selDay, setSelDay] = useState(null);
+
+  const load = async () => { setLoading(true); try { setItems(await listFirmDeadlines()); } catch (e) { console.error(e); } setLoading(false); };
+  useEffect(() => { load(); }, []);
+
+  const toggle = async (d) => {
+    const done = !d.done;
+    setItems((p) => p.map((x) => x.id === d.id ? { ...x, done } : x));
+    try { await updateMatterDeadline(d.id, { done, done_at: done ? new Date().toISOString() : null }); } catch (e) { load(); }
+  };
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const parse = (s) => s ? new Date(s + "T00:00:00") : null;
+  const fmt = (s) => { const d = parse(s); return d ? d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : "No date"; };
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const matterLabel = (m) => m ? ([m.file_number, m.property_address].filter(Boolean).join(" · ") || "(matter)") : "(matter)";
+
+  const visible = items.filter((d) => (showDone || !d.done) && d.due_date);
+  const overdue = [], soon = [], later = [];
+  const in7 = new Date(today); in7.setDate(in7.getDate() + 7);
+  for (const d of visible) {
+    const due = parse(d.due_date);
+    if (!d.done && due < today) overdue.push(d);
+    else if (due <= in7) soon.push(d);
+    else later.push(d);
+  }
+
+  const navBtn = { width: 34, height: 34, borderRadius: 8, border: `1px solid ${LINE}`, background: "#fff", cursor: "pointer", fontSize: 17, color: NV, lineHeight: 1 };
+  const Row = ({ d }) => {
+    const due = parse(d.due_date);
+    const od = !d.done && due < today;
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px", borderTop: "1px solid #eef1f6" }}>
+        <input type="checkbox" checked={!!d.done} onChange={() => toggle(d)} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
+        <div style={{ width: 96, flexShrink: 0, fontSize: 12, fontWeight: 600, color: od ? "#dc2626" : NV }}>{fmt(d.due_date)}</div>
+        <div onClick={() => d.matter && onOpen(d.matter.id)} style={{ minWidth: 0, flex: 1, cursor: d.matter ? "pointer" : "default" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: d.done ? "#9ca3af" : "#0f172a", textDecoration: d.done ? "line-through" : "none" }}>{d.name}</div>
+          <div style={{ fontSize: 11.5, color: MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{matterLabel(d.matter)}</div>
+        </div>
+        {od && <span style={tag("#fef2f2", "#dc2626")}>overdue</span>}
+      </div>
+    );
+  };
+  const Group = ({ label, list, color }) => list.length === 0 ? null : (
+    <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, marginBottom: 14, overflow: "hidden" }}>
+      <div style={{ padding: "11px 16px", fontWeight: 600, fontSize: 13, color, background: "#fafbfd", display: "flex", justifyContent: "space-between" }}>
+        <span>{label}</span><span style={{ color: MUTED }}>{list.length}</span>
+      </div>
+      {list.map((d) => <Row key={d.id} d={d} />)}
+    </div>
+  );
+
+  const monthCells = useMemo(() => {
+    const start = new Date(cursor); const startDow = start.getDay();
+    const gridStart = new Date(start); gridStart.setDate(1 - startDow);
+    const cells = [];
+    for (let i = 0; i < 42; i++) { const d = new Date(gridStart); d.setDate(gridStart.getDate() + i); cells.push(d); }
+    return cells;
+  }, [cursor]);
+  const byDay = useMemo(() => { const m = {}; for (const d of items) { if ((showDone || !d.done) && d.due_date) (m[d.due_date] = m[d.due_date] || []).push(d); } return m; }, [items, showDone]);
+  const monthName = cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+
+  return (
+    <div style={{ maxWidth: 860 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: BL, fontWeight: 600 }}>Your practice</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Calendar</div>
+          <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Every deadline across your matters, in one place.</div>
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <label style={{ fontSize: 12, color: MUTED, display: "flex", alignItems: "center", gap: 5, cursor: "pointer" }}><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show completed</label>
+          {["agenda", "month"].map((v) => <button key={v} onClick={() => setView(v)} style={{ padding: "7px 14px", borderRadius: 18, border: `1px solid ${LINE}`, background: view === v ? BL : "#fff", color: view === v ? "#fff" : MUTED, cursor: "pointer", fontSize: 12.5, fontWeight: 600, textTransform: "capitalize" }}>{v}</button>)}
+        </div>
+      </div>
+
+      {loading ? <div style={{ color: "#9ca3af", fontSize: 13, padding: 20 }}>Loading…</div>
+        : view === "agenda"
+          ? (visible.length === 0
+            ? <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: "40px 18px", textAlign: "center", color: "#9ca3af", fontSize: 13 }}>No deadlines yet. Add them on a matter, or set up your firm template in Deadline setup.</div>
+            : <>
+              <Group label="Overdue" list={overdue} color="#dc2626" />
+              <Group label="Next 7 days" list={soon} color={NV} />
+              <Group label="Later" list={later} color={MUTED} />
+            </>)
+          : <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <button onClick={() => { setSelDay(null); setCursor((c) => { const n = new Date(c); n.setMonth(n.getMonth() - 1); return n; }); }} style={navBtn}>‹</button>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>{monthName}</div>
+              <button onClick={() => { setSelDay(null); setCursor((c) => { const n = new Date(c); n.setMonth(n.getMonth() + 1); return n; }); }} style={navBtn}>›</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 }}>
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((w) => <div key={w} style={{ textAlign: "center", fontSize: 10.5, fontWeight: 600, color: MUTED, padding: "2px 0" }}>{w}</div>)}
+              {monthCells.map((d, i) => {
+                const inMonth = d.getMonth() === cursor.getMonth();
+                const key = iso(d);
+                const dayItems = byDay[key] || [];
+                const isToday = d.getTime() === today.getTime();
+                return (
+                  <div key={i} onClick={() => dayItems.length && setSelDay(selDay === key ? null : key)} style={{ minHeight: 66, border: `1px solid ${selDay === key ? BL : "#eef1f6"}`, borderRadius: 8, padding: 5, background: inMonth ? "#fff" : "#fafafa", cursor: dayItems.length ? "pointer" : "default", opacity: inMonth ? 1 : 0.55 }}>
+                    <div style={{ fontSize: 11, fontWeight: isToday ? 700 : 500, color: isToday ? BL : "#334155", textAlign: "right" }}>{d.getDate()}</div>
+                    {dayItems.slice(0, 3).map((x) => { const xo = !x.done && parse(x.due_date) < today; return <div key={x.id} style={{ fontSize: 9.5, marginTop: 2, padding: "1px 4px", borderRadius: 3, background: x.done ? "#f1f5f9" : xo ? "#fef2f2" : "#e8f3ff", color: x.done ? "#94a3b8" : xo ? "#dc2626" : "#0f6fd1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.name}</div>; })}
+                    {dayItems.length > 3 && <div style={{ fontSize: 9, color: MUTED, marginTop: 1 }}>+{dayItems.length - 3} more</div>}
+                  </div>
+                );
+              })}
+            </div>
+            {selDay && (byDay[selDay] || []).length > 0 && (
+              <div style={{ marginTop: 14, borderTop: `1px solid ${LINE}`, paddingTop: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: NV, padding: "8px 16px 0" }}>{fmt(selDay)}</div>
+                {(byDay[selDay] || []).map((d) => <Row key={d.id} d={d} />)}
+              </div>
+            )}
+          </div>}
     </div>
   );
 }

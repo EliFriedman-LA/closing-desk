@@ -259,3 +259,12 @@ export async function generateDeadlines(firmId, matter) {
   }
   return { added, updated, skipped };
 }
+
+// All of the firm's deadlines across every matter, with matter context (for the calendar).
+export async function listFirmDeadlines() {
+  const { data, error } = await supabase.from("matter_deadlines")
+    .select("*, matter:matters(id,file_number,property_address,town)")
+    .order("due_date", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
