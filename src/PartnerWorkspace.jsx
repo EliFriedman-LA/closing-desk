@@ -12,7 +12,8 @@ import {
 import Contacts from "./PartnerContacts.jsx";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
-import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile } from "./partnerDb.js";
+import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
+import { DOC_TOKENS, TOKEN_LABELS, buildMergeData, generateDocs, downloadBlob } from "./partnerDocs.js";
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0", FIRM_DEFAULT = "#0f5132";
 
@@ -135,7 +136,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
 
         <main style={{ padding: "24px 26px 60px", maxWidth: 1100, width: "100%" }}>
           {selected
-            ? <MatterDetail matter={selected} email={email} onBack={() => setSelectedId(null)} onStage={onStage} onDelete={onDelete} onRefresh={load} onRead={loadUnreads} />
+            ? <MatterDetail matter={selected} firm={firm} email={email} onBack={() => setSelectedId(null)} onStage={onStage} onDelete={onDelete} onRefresh={load} onRead={loadUnreads} />
             : page === "dashboard"
               ? <Dashboard firm={firm} org={org} accent={accent} initials={initials} openCount={openCount} lakelandCount={lakelandCount} total={matters.length} recent={matters.slice(0, 5)} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} />
               : page === "contacts"
@@ -236,7 +237,7 @@ function MatterRow({ m, unread, onOpen }) {
 }
 
 /* ---------------- Matter detail ---------------- */
-function MatterDetail({ matter, email, onBack, onStage, onDelete, onRefresh, onRead }) {
+function MatterDetail({ matter, firm, email, onBack, onStage, onDelete, onRefresh, onRead }) {
   const conn = matter.title_provider === "lakeland";
   const linked = !!matter.lakeland_file_number;
   const [live, setLive] = useState(null);
@@ -244,6 +245,8 @@ function MatterDetail({ matter, email, onBack, onStage, onDelete, onRefresh, onR
   const [showConnect, setShowConnect] = useState(false);
   const [request, setRequest] = useState(null);
   const [showPlace, setShowPlace] = useState(false);
+  const [showGen, setShowGen] = useState(false);
+  const [docsKey, setDocsKey] = useState(0);
 
   useEffect(() => {
     let on = true;
@@ -389,18 +392,19 @@ function MatterDetail({ matter, email, onBack, onStage, onDelete, onRefresh, onR
 
       <DeadlinesPanel matter={matter} onRefresh={onRefresh} />
 
-      <DocumentsPanel matter={matter} />
+      <DocumentsPanel matter={matter} reloadKey={docsKey} onGenerate={() => setShowGen(true)} />
 
       <MessagesPanel matter={matter} email={email} onRead={onRead} />
 
       {showConnect && <ConnectModal matter={matter} onClose={() => setShowConnect(false)} onLinked={() => { setShowConnect(false); onRefresh && onRefresh(); }} />}
       {showPlace && <PlaceOrderModal matter={matter} onClose={() => setShowPlace(false)} onPlaced={async () => { setShowPlace(false); const r = await getMatterRequest(matter.id); setRequest(r); }} />}
+      {showGen && <GenerateDocModal matter={matter} firm={firm} onClose={() => setShowGen(false)} onSaved={() => setDocsKey((k) => k + 1)} />}
     </div>
   );
 }
 
 /* ---------------- Documents panel ---------------- */
-function DocumentsPanel({ matter }) {
+function DocumentsPanel({ matter, reloadKey, onGenerate }) {
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -412,7 +416,7 @@ function DocumentsPanel({ matter }) {
     try { setDocs(await listDocuments(matter.id)); } catch (e) { console.error(e); }
     setLoading(false);
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [matter.id]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [matter.id, reloadKey]);
 
   const onPick = async (e) => {
     const file = e.target.files && e.target.files[0];
@@ -441,7 +445,10 @@ function DocumentsPanel({ matter }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, gap: 10 }}>
         <div style={{ fontWeight: 600, fontSize: 14 }}>Documents</div>
         <input ref={inputRef} type="file" onChange={onPick} style={{ display: "none" }} />
-        <button onClick={() => inputRef.current && inputRef.current.click()} disabled={busy} style={{ padding: "7px 13px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>{busy ? "Uploading…" : "⬆ Upload"}</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {onGenerate && <button onClick={onGenerate} style={{ padding: "7px 13px", background: "#fff", color: NV, border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>✦ Generate</button>}
+          <button onClick={() => inputRef.current && inputRef.current.click()} disabled={busy} style={{ padding: "7px 13px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>{busy ? "Uploading…" : "⬆ Upload"}</button>
+        </div>
       </div>
       <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 10 }}>
         {matter.lakeland_file_number ? "Shared with Lakeland on this file. They can see what you upload, and you'll see what they share." : "Your files for this matter. They'll be shared with Lakeland once this matter is connected to a file."}
@@ -847,12 +854,6 @@ function PartiesPanel({ matter, onRefresh }) {
 }
 
 /* ---------------- Doc templates (Phase 3.2a authoring) ---------------- */
-const DOC_TOKENS = [
-  "firm_name", "buyer", "seller", "lender",
-  "property_address", "town", "state",
-  "file_number", "lakeland_file_number", "transaction_type",
-  "contract_date", "closing_date", "title_company", "today"
-];
 const STARTER_BODY = [
   "{{firm_name}}",
   "{{today}}",
@@ -987,6 +988,117 @@ function TemplateEditorModal({ template, onClose, onSaved }) {
         <div style={{ padding: "14px 20px", borderTop: `1px solid ${LINE}`, display: "flex", justifyContent: "flex-end", gap: 10, position: "sticky", bottom: 0, background: "#fff" }}>
           <button onClick={onClose} style={{ padding: "9px 16px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer", color: NV }}>Cancel</button>
           <button onClick={save} disabled={saving} style={{ padding: "9px 18px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>{saving ? "Saving…" : "Save template"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Generate document (Phase 3.2b) ---------------- */
+function GenerateDocModal({ matter, firm, onClose, onSaved }) {
+  const [templates, setTemplates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tplId, setTplId] = useState("");
+  const [data, setData] = useState(() => buildMergeData(matter, firm));
+  const [wantDocx, setWantDocx] = useState(true);
+  const [wantPdf, setWantPdf] = useState(true);
+  const [saveToFile, setSaveToFile] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [done, setDone] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const t = await listDocTemplates();
+        setTemplates(t);
+        if (t.length) setTplId(t[0].id);
+      } catch (e) { setErr(e.message || String(e)); }
+      setLoading(false);
+    })();
+  }, []);
+
+  const tpl = templates.find((t) => t.id === tplId) || null;
+  const setField = (k, v) => setData((p) => ({ ...p, [k]: v }));
+
+  const run = async () => {
+    setErr(""); setDone("");
+    if (!tpl) { setErr("Pick a template first."); return; }
+    if (!wantDocx && !wantPdf) { setErr("Choose at least one format."); return; }
+    setBusy(true);
+    try {
+      const baseName = `${tpl.name}${matter.file_number ? " - " + matter.file_number : ""}`;
+      const { files } = await generateDocs({
+        template: tpl, data, baseName, wantDocx, wantPdf,
+        fetchDocxBuffer: downloadDocTemplateFile
+      });
+      for (const f of files) downloadBlob(f.blob, f.name);
+      if (saveToFile) {
+        for (const f of files) {
+          const fileObj = new File([f.blob], f.name, { type: f.type });
+          await uploadDocument(matter.firm_id, matter, fileObj);
+        }
+        onSaved && onSaved();
+      }
+      setDone(saveToFile
+        ? `Generated ${files.length} file${files.length > 1 ? "s" : ""} — downloaded and saved to this file.`
+        : `Generated ${files.length} file${files.length > 1 ? "s" : ""} — downloaded.`);
+    } catch (e) {
+      setErr(e.message || String(e));
+    }
+    setBusy(false);
+  };
+
+  const fld = { width: "100%", padding: "8px 10px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" };
+  const lbl = { fontSize: 11, color: MUTED, fontWeight: 600, marginBottom: 3, display: "block" };
+
+  return (
+    <div onClick={(e) => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 22, zIndex: 60 }}>
+      <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 600, maxHeight: "92vh", overflow: "auto", boxShadow: "0 12px 40px rgba(16,24,40,.2)" }}>
+        <div style={{ padding: "16px 20px", borderBottom: `1px solid ${LINE}`, display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: "#fff" }}>
+          <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 18 }}>Generate document</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, color: "#9ca3af", cursor: "pointer" }}>×</button>
+        </div>
+        <div style={{ padding: 20 }}>
+          {loading ? <div style={{ color: "#9ca3af", fontSize: 13 }}>Loading templates…</div>
+            : templates.length === 0
+              ? <div style={{ fontSize: 13, color: MUTED, padding: "10px 0" }}>No templates yet. Add one on the <b>Doc templates</b> page first.</div>
+              : <>
+                <label style={lbl}>Template</label>
+                <select value={tplId} onChange={(e) => setTplId(e.target.value)} style={{ ...fld, marginBottom: 14 }}>
+                  {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.source_type === "docx" ? " (Word)" : ""}</option>)}
+                </select>
+
+                <div style={{ fontSize: 11.5, color: MUTED, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 8 }}>Fields for this document</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+                  {DOC_TOKENS.map((k) => (
+                    <div key={k}>
+                      <label style={lbl}>{TOKEN_LABELS[k] || k}</label>
+                      <input value={data[k] || ""} onChange={(e) => setField(k, e.target.value)} style={fld} />
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center", padding: "12px 14px", background: "#f8fafc", border: `1px solid ${LINE}`, borderRadius: 10, marginBottom: 14 }}>
+                  <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+                    <input type="checkbox" checked={wantDocx} onChange={(e) => setWantDocx(e.target.checked)} /> Word
+                  </label>
+                  <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+                    <input type="checkbox" checked={wantPdf} onChange={(e) => setWantPdf(e.target.checked)} /> PDF
+                  </label>
+                  <span style={{ width: 1, height: 18, background: LINE }} />
+                  <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+                    <input type="checkbox" checked={saveToFile} onChange={(e) => setSaveToFile(e.target.checked)} /> Save to this file{matter.lakeland_file_number ? " (shared with Lakeland)" : ""}
+                  </label>
+                </div>
+
+                {err && <div style={{ fontSize: 12.5, color: "#b91c1c", marginBottom: 10 }}>{err}</div>}
+                {done && <div style={{ fontSize: 12.5, color: "#16a34a", fontWeight: 600, marginBottom: 10 }}>{done} ✓</div>}
+              </>}
+        </div>
+        <div style={{ padding: "14px 20px", borderTop: `1px solid ${LINE}`, display: "flex", justifyContent: "flex-end", gap: 10, position: "sticky", bottom: 0, background: "#fff" }}>
+          <button onClick={onClose} style={{ padding: "9px 16px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer", color: NV }}>Close</button>
+          <button onClick={run} disabled={busy || loading || templates.length === 0} style={{ padding: "9px 18px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: busy ? "default" : "pointer" }}>{busy ? "Generating…" : "Generate"}</button>
         </div>
       </div>
     </div>
