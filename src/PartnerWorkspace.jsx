@@ -491,7 +491,7 @@ function DeadlinesPanel({ matter, onRefresh }) {
       if (r.added) bits.push(`${r.added} added`);
       if (r.updated) bits.push(`${r.updated} updated`);
       if (r.skipped) bits.push(`${r.skipped} skipped (no anchor date)`);
-      setMsg(bits.length ? bits.join(" \u00B7 ") : "Nothing to generate \u2014 set up your template in Deadline setup.");
+      setMsg(bits.length ? bits.join(" · ") : "Nothing to generate — set up your template in Deadline setup.");
     } catch (e) { setMsg(e.message || String(e)); }
     setBusy(false);
   };
@@ -525,7 +525,7 @@ function DeadlinesPanel({ matter, onRefresh }) {
     <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16, maxWidth: 560 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10 }}>
         <div style={{ fontWeight: 600, fontSize: 14 }}>Deadlines</div>
-        <button onClick={generate} disabled={busy} style={{ padding: "7px 13px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>{busy ? "\u2026" : "\u21BB Generate from template"}</button>
+        <button onClick={generate} disabled={busy} style={{ padding: "7px 13px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>{busy ? "…" : "↻ Generate from template"}</button>
       </div>
 
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
@@ -538,18 +538,18 @@ function DeadlinesPanel({ matter, onRefresh }) {
       </div>
       {msg && <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 10 }}>{msg}</div>}
 
-      {loading ? <div style={{ fontSize: 12.5, color: "#9ca3af" }}>Loading\u2026</div>
-        : items.length === 0 ? <div style={{ fontSize: 12.5, color: "#9ca3af", padding: "6px 0" }}>No deadlines yet. Set your dates and hit \u201CGenerate,\u201D or add one below.</div>
+      {loading ? <div style={{ fontSize: 12.5, color: "#9ca3af" }}>Loading…</div>
+        : items.length === 0 ? <div style={{ fontSize: 12.5, color: "#9ca3af", padding: "6px 0" }}>No deadlines yet. Set your dates and hit “Generate,” or add one below.</div>
           : <div style={{ display: "flex", flexDirection: "column" }}>
             {items.map((d) => (
               <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: "1px solid #eef1f6" }}>
                 <input type="checkbox" checked={!!d.done} onChange={() => toggle(d)} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: d.done ? "#9ca3af" : NV, textDecoration: d.done ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}{d.source === "template" && <span style={{ ...tag("#eef2ff", "#4338ca"), marginLeft: 6 }}>auto</span>}</div>
-                  <div style={{ fontSize: 11, color: isOverdue(d) ? "#dc2626" : MUTED, fontWeight: isOverdue(d) ? 600 : 400 }}>{fmt(d.due_date)}{isOverdue(d) ? " \u00B7 overdue" : ""}</div>
+                  <div style={{ fontSize: 11, color: isOverdue(d) ? "#dc2626" : MUTED, fontWeight: isOverdue(d) ? 600 : 400 }}>{fmt(d.due_date)}{isOverdue(d) ? " · overdue" : ""}</div>
                 </div>
                 <input type="date" value={d.due_date || ""} onChange={(e) => editDate(d, e.target.value)} style={{ ...dateInput, padding: "4px 6px", fontSize: 11.5 }} />
-                <button onClick={() => remove(d)} title="Delete" style={{ padding: "5px 8px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 11.5, cursor: "pointer" }}>\u2715</button>
+                <button onClick={() => remove(d)} title="Delete" style={{ padding: "5px 8px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 11.5, cursor: "pointer" }}>✕</button>
               </div>
             ))}
           </div>}
@@ -561,7 +561,7 @@ function DeadlinesPanel({ matter, onRefresh }) {
           <button onClick={addManual} disabled={busy || !nName.trim()} style={{ padding: "0 14px", background: (busy || !nName.trim()) ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: (busy || !nName.trim()) ? "default" : "pointer" }}>Add</button>
           <button onClick={() => { setAdding(false); setNName(""); setNDate(""); }} style={{ padding: "0 12px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12.5, cursor: "pointer" }}>Cancel</button>
         </div>
-        : <button onClick={() => setAdding(true)} style={{ marginTop: 12, fontSize: 12.5, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer", padding: 0 }}>\uFF0B Add deadline</button>}
+        : <button onClick={() => setAdding(true)} style={{ marginTop: 12, fontSize: 12.5, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer", padding: 0 }}>＋ Add deadline</button>}
     </div>
   );
 }
@@ -603,16 +603,16 @@ function DeadlineSetup({ firmId }) {
       <div style={{ marginBottom: 18 }}>
         <div style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: BL, fontWeight: 600 }}>Settings</div>
         <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Deadline setup</div>
-        <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Your firm's standard deadlines. Each is an offset from a matter's contract or closing date. They auto-fill onto a matter when you hit \u201CGenerate.\u201D</div>
+        <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Your firm's standard deadlines. Each is an offset from a matter's contract or closing date. They auto-fill onto a matter when you hit “Generate.”</div>
       </div>
 
       <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 6 }}>
-        {loading ? <div style={{ padding: 22, color: "#9ca3af", fontSize: 13 }}>Loading\u2026</div>
+        {loading ? <div style={{ padding: 22, color: "#9ca3af", fontSize: 13 }}>Loading…</div>
           : rows.length === 0
             ? <div style={{ padding: "26px 18px", textAlign: "center" }}>
               <div style={{ color: MUTED, fontSize: 13, marginBottom: 12 }}>No deadlines set up yet.</div>
               <button onClick={seed} disabled={busy} style={{ padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer", marginRight: 8 }}>Load NJ starter set</button>
-              <button onClick={addRow} disabled={busy} style={{ padding: "9px 16px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>\uFF0B Add one</button>
+              <button onClick={addRow} disabled={busy} style={{ padding: "9px 16px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ Add one</button>
             </div>
             : <div>
               <div style={{ display: "flex", gap: 8, padding: "8px 12px", fontSize: 11, color: MUTED, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em" }}>
@@ -625,15 +625,15 @@ function DeadlineSetup({ firmId }) {
                     {DEADLINE_ANCHORS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
                   <input type="number" value={r.offset_days} onChange={(e) => patch(r.id, { offset_days: parseInt(e.target.value || "0", 10) })} style={{ ...inp, width: 130 }} />
-                  <button onClick={() => remove(r)} title="Remove" style={{ padding: "6px 9px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>\u2715</button>
+                  <button onClick={() => remove(r)} title="Remove" style={{ padding: "6px 9px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>✕</button>
                 </div>
               ))}
               <div style={{ padding: "10px 12px" }}>
-                <button onClick={addRow} disabled={busy} style={{ fontSize: 12.5, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer", padding: 0 }}>\uFF0B Add deadline</button>
+                <button onClick={addRow} disabled={busy} style={{ fontSize: 12.5, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer", padding: 0 }}>＋ Add deadline</button>
               </div>
             </div>}
       </div>
-      <div style={{ fontSize: 11.5, color: MUTED, marginTop: 10 }}>Tip: a negative offset means \u201Cbefore\u201D the anchor (e.g. Closing \u22123 = three days before closing). Positive means after.</div>
+      <div style={{ fontSize: 11.5, color: MUTED, marginTop: 10 }}>Tip: a negative offset means “before” the anchor (e.g. Closing −3 = three days before closing). Positive means after.</div>
     </div>
   );
 }
@@ -685,12 +685,12 @@ function MessagesPanel({ matter, email, onRead }) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 320, overflowY: "auto", padding: "4px 2px" }}>
         {loading ? <div style={{ fontSize: 12.5, color: "#9ca3af" }}>Loading…</div>
-          : msgs.length === 0 ? <div style={{ fontSize: 12.5, color: "#9ca3af", padding: "8px 0" }}>{connected ? "No messages yet. Say hello \uD83D\uDC4B" : "No messages yet."}</div>
+          : msgs.length === 0 ? <div style={{ fontSize: 12.5, color: "#9ca3af", padding: "8px 0" }}>{connected ? "No messages yet. Say hello 👋" : "No messages yet."}</div>
           : msgs.map((m) => {
             const mine = m.sender_type === "firm";
             return (
               <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start" }}>
-                <div style={{ fontSize: 10.5, color: MUTED, margin: "0 4px 3px" }}>{mine ? "You" : "Lakeland"}{m.sender_name ? ` \u00B7 ${m.sender_name}` : ""} \u00B7 {fmt(m.created_at)}</div>
+                <div style={{ fontSize: 10.5, color: MUTED, margin: "0 4px 3px" }}>{mine ? "You" : "Lakeland"}{m.sender_name ? ` · ${m.sender_name}` : ""} · {fmt(m.created_at)}</div>
                 <div style={{ maxWidth: "82%", padding: "9px 12px", borderRadius: 13, fontSize: 13, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word", background: mine ? BL : "#f1f5f9", color: mine ? "#fff" : "#0f172a", borderBottomRightRadius: mine ? 4 : 13, borderBottomLeftRadius: mine ? 13 : 4 }}>{m.body}</div>
               </div>
             );
@@ -700,10 +700,10 @@ function MessagesPanel({ matter, email, onRead }) {
 
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} rows={2}
-          placeholder={connected ? "Write a message\u2026" : "Connect to a file first"} disabled={!connected || busy}
+          placeholder={connected ? "Write a message…" : "Connect to a file first"} disabled={!connected || busy}
           style={{ flex: 1, resize: "none", border: `1px solid ${LINE}`, borderRadius: 9, padding: "9px 11px", fontSize: 13, fontFamily: "inherit", outline: "none", background: connected ? "#fff" : "#f8fafc" }} />
         <button onClick={send} disabled={!connected || busy || !text.trim()}
-          style={{ padding: "0 16px", background: (!connected || busy || !text.trim()) ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: (!connected || busy || !text.trim()) ? "default" : "pointer" }}>{busy ? "\u2026" : "Send"}</button>
+          style={{ padding: "0 16px", background: (!connected || busy || !text.trim()) ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: (!connected || busy || !text.trim()) ? "default" : "pointer" }}>{busy ? "…" : "Send"}</button>
       </div>
     </div>
   );
