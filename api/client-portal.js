@@ -39,14 +39,17 @@ export default async function handler(req, res) {
     // best-effort view stamp
     db.from("client_links").update({ last_viewed_at: new Date().toISOString() }).eq("id", link.id).then(() => {}, () => {});
 
-    const [matterRes, firmRes, dlRes] = await Promise.all([
+    const [matterRes, firmRes, dlRes, docRes] = await Promise.all([
       db.from("matters")
         .select("property_address, town, state, transaction_type, stage, contract_date, closing_date, lakeland_file_number")
         .eq("id", link.matter_id).maybeSingle(),
       db.from("firms").select("name, brand_color").eq("id", link.firm_id).maybeSingle(),
       db.from("matter_deadlines").select("name, due_date, done")
         .eq("matter_id", link.matter_id)
-        .order("due_date", { ascending: true, nullsFirst: false })
+        .order("due_date", { ascending: true, nullsFirst: false }),
+      db.from("file_documents").select("id, name, size, created_at")
+        .eq("matter_id", link.matter_id).eq("client_visible", true)
+        .order("created_at", { ascending: false })
     ]);
 
     const matter = matterRes.data;
@@ -66,6 +69,7 @@ export default async function handler(req, res) {
         closing_date: matter.closing_date || null
       },
       deadlines: (dlRes.data || []).map((d) => ({ name: d.name, due_date: d.due_date, done: !!d.done })),
+      documents: (docRes.data || []).map((d) => ({ id: d.id, name: d.name, size: d.size, created_at: d.created_at })),
       settings: { allow_upload: !!link.allow_upload, allow_messaging: !!link.allow_messaging }
     });
   } catch (e) {
