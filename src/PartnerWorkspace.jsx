@@ -14,6 +14,7 @@ import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, 
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
 import { DOC_TOKENS, TOKEN_LABELS, buildMergeData, generateDocs, downloadBlob } from "./partnerDocs.js";
+import { createClientLink, listClientLinks, revokeClientLink } from "./partnerDb.js";
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0", FIRM_DEFAULT = "#0f5132";
 
@@ -391,6 +392,8 @@ function MatterDetail({ matter, firm, email, onBack, onStage, onDelete, onRefres
       <PartiesPanel matter={matter} onRefresh={onRefresh} />
 
       <DeadlinesPanel matter={matter} onRefresh={onRefresh} />
+
+      <ClientPortalPanel matter={matter} />
 
       <DocumentsPanel matter={matter} reloadKey={docsKey} onGenerate={() => setShowGen(true)} />
 
@@ -990,6 +993,109 @@ function TemplateEditorModal({ template, onClose, onSaved }) {
           <button onClick={save} disabled={saving} style={{ padding: "9px 18px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>{saving ? "Saving…" : "Save template"}</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------------- Client portal links (Phase 4.0) ---------------- */
+function ClientPortalPanel({ matter }) {
+  const [links, setLinks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [label, setLabel] = useState("Client");
+  const [expires, setExpires] = useState("");
+  const [allowUpload, setAllowUpload] = useState(false);
+  const [allowMsg, setAllowMsg] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [fresh, setFresh] = useState(null); // { url } shown once after creation
+  const [copied, setCopied] = useState(false);
+
+  const load = async () => { setLoading(true); try { setLinks(await listClientLinks(matter.id)); } catch (e) { console.error(e); } setLoading(false); };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [matter.id]);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const { token } = await createClientLink(matter.firm_id, matter.id, {
+        label: label.trim() || "Client",
+        allow_upload: allowUpload,
+        allow_messaging: allowMsg,
+        expires_at: expires ? new Date(expires + "T23:59:59").toISOString() : null
+      });
+      setFresh({ url: `${window.location.origin}/c/${token}` });
+      setCopied(false);
+      setLabel("Client"); setExpires(""); setAllowUpload(false); setAllowMsg(false); setCreating(false);
+      await load();
+    } catch (e) { alert(e.message || String(e)); }
+    setBusy(false);
+  };
+  const revoke = async (l) => {
+    if (!window.confirm("Revoke this client link? It stops working immediately.")) return;
+    try { await revokeClientLink(l.id); await load(); } catch (e) { alert(e.message || String(e)); }
+  };
+  const copy = (url) => { try { navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e) { /* ignore */ } };
+
+  const statusOf = (l) => l.revoked_at ? ["Revoked", "#9ca3af"] : (l.expires_at && new Date(l.expires_at) < new Date()) ? ["Expired", "#dc2626"] : ["Active", "#16a34a"];
+  const fmt = (v) => { if (!v) return ""; const d = new Date(v); return isNaN(d.getTime()) ? "" : d.toLocaleDateString(); };
+
+  const inp = { width: "100%", padding: "8px 10px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" };
+  const lbl = { fontSize: 11, color: MUTED, fontWeight: 600, marginBottom: 3, display: "block" };
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Client portal</div>
+        {!creating && <button onClick={() => { setCreating(true); setFresh(null); }} style={{ padding: "7px 13px", background: BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>＋ Create link</button>}
+      </div>
+
+      {fresh && (
+        <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#065f46", marginBottom: 6 }}>Link created — copy it now, it won't be shown again</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input readOnly value={fresh.url} onFocus={(e) => e.target.select()} style={{ ...inp, background: "#fff", fontSize: 12 }} />
+            <button onClick={() => copy(fresh.url)} style={{ padding: "8px 13px", background: "#065f46", color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>{copied ? "Copied ✓" : "Copy"}</button>
+          </div>
+        </div>
+      )}
+
+      {creating && (
+        <div style={{ background: "#f8fafc", border: `1px solid ${LINE}`, borderRadius: 10, padding: 14, marginBottom: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+            <div><label style={lbl}>Label</label><input style={inp} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Buyer" /></div>
+            <div><label style={lbl}>Expires (optional)</label><input type="date" style={inp} value={expires} onChange={(e) => setExpires(e.target.value)} /></div>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 12 }}>
+            <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 7, cursor: "pointer", color: MUTED }}>
+              <input type="checkbox" checked={allowUpload} onChange={(e) => setAllowUpload(e.target.checked)} /> Allow client uploads
+            </label>
+            <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 7, cursor: "pointer", color: MUTED }}>
+              <input type="checkbox" checked={allowMsg} onChange={(e) => setAllowMsg(e.target.checked)} /> Allow messaging
+            </label>
+          </div>
+          <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 12 }}>Uploads &amp; messaging are stored on the link now; those features turn on in a later update.</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={create} disabled={busy} style={{ padding: "8px 15px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: busy ? "default" : "pointer" }}>{busy ? "Creating…" : "Create link"}</button>
+            <button onClick={() => setCreating(false)} style={{ padding: "8px 15px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: "pointer", color: NV }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {loading ? <div style={{ fontSize: 13, color: "#9ca3af" }}>Loading…</div>
+        : links.length === 0
+          ? <div style={{ fontSize: 13, color: MUTED }}>No client links yet. Create one to share a secure, read-only closing portal with your client.</div>
+          : links.map((l) => {
+            const [st, col] = statusOf(l);
+            return (
+              <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: "1px solid #eef1f6" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: NV }}>{l.label || "Client"}</div>
+                  <div style={{ fontSize: 11.5, color: MUTED }}>Created {fmt(l.created_at)}{l.last_viewed_at ? ` · last viewed ${fmt(l.last_viewed_at)}` : " · not viewed yet"}{l.expires_at ? ` · expires ${fmt(l.expires_at)}` : ""}</div>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: col, flexShrink: 0 }}>{st}</span>
+                {!l.revoked_at && <button onClick={() => revoke(l)} style={{ padding: "5px 10px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 7, fontSize: 11.5, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>Revoke</button>}
+              </div>
+            );
+          })}
     </div>
   );
 }

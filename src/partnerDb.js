@@ -346,3 +346,42 @@ export async function downloadDocTemplateFile(path) {
   if (error) throw error;
   return await data.arrayBuffer();
 }
+
+/* ---------------- Client portal links (Phase 4.0) ---------------- */
+async function sha256hex(s) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(s)));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function randomToken() {
+  const a = new Uint8Array(24);
+  crypto.getRandomValues(a);
+  return Array.from(a).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+// Returns { link, token }. The plaintext token is only available here at creation —
+// we store just its hash, so the full link must be copied now.
+export async function createClientLink(firmId, matterId, opts = {}) {
+  const token = randomToken();
+  const token_hash = await sha256hex(token);
+  const { data, error } = await supabase.from("client_links").insert({
+    firm_id: firmId,
+    matter_id: matterId,
+    token_hash,
+    label: opts.label || "Client",
+    allow_upload: !!opts.allow_upload,
+    allow_messaging: !!opts.allow_messaging,
+    expires_at: opts.expires_at || null
+  }).select().single();
+  if (error) throw error;
+  return { link: data, token };
+}
+export async function listClientLinks(matterId) {
+  const { data, error } = await supabase.from("client_links")
+    .select("*").eq("matter_id", matterId).order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+export async function revokeClientLink(id) {
+  const { error } = await supabase.from("client_links")
+    .update({ revoked_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
+}
