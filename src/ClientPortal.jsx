@@ -3,7 +3,7 @@
 // in the URL is validated server-side; this view only shows what the endpoint returns.
 
 import React, { useEffect, useState } from "react";
-import { getClientPortal } from "./clientDb.js";
+import { getClientPortal, getClientDocUrl } from "./clientDb.js";
 
 const STAGES = ["Order", "Title search", "Commitment", "Clear to close", "Funded", "Recorded", "Policy"];
 
@@ -37,6 +37,18 @@ export default function ClientPortal() {
   const [state, setState] = useState("loading"); // loading | error | ready
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
+  const [dl, setDl] = useState(""); // id of doc currently being fetched
+
+  const openDoc = async (docId) => {
+    setDl(docId);
+    try {
+      const { url } = await getClientDocUrl(token, docId);
+      window.open(url, "_blank", "noopener");
+    } catch (e) {
+      alert(e.message || "Unable to open this document.");
+    }
+    setDl("");
+  };
 
   useEffect(() => {
     if (!token) { setErr("This link is invalid."); setState("error"); return; }
@@ -74,7 +86,7 @@ export default function ClientPortal() {
     );
   }
 
-  const { firm, matter, deadlines } = data;
+  const { firm, matter, deadlines, documents } = data;
   const stage = Math.max(0, Math.min(STAGES.length - 1, matter.stage || 0));
   const pct = Math.round((stage / (STAGES.length - 1)) * 100);
   const loc = [matter.town, matter.state].filter(Boolean).join(", ");
@@ -140,6 +152,24 @@ export default function ClientPortal() {
                   <div style={{ width: 18, height: 18, borderRadius: 99, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, background: d.done ? accent : "#f1f5f9", color: d.done ? "#fff" : "#94a3b8" }}>{d.done ? "✓" : ""}</div>
                   <div style={{ flex: 1, fontSize: 14, fontWeight: 600, color: d.done ? MUTED : NV, textDecoration: d.done ? "line-through" : "none" }}>{d.name}</div>
                   <div style={{ fontSize: 12.5, color: MUTED, fontWeight: 600 }}>{fmtDate(d.due_date)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {documents && documents.length > 0 && (
+          <div style={card}>
+            <div style={sectionTitle}>Documents</div>
+            <div>
+              {documents.map((d, i) => (
+                <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 0", borderTop: i ? `1px solid #eef1f6` : "none" }}>
+                  <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, background: shade(accent, .86), color: accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>▤</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: NV, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                    <div style={{ fontSize: 11.5, color: MUTED }}>{fmtDate(d.created_at)}</div>
+                  </div>
+                  <button onClick={() => openDoc(d.id)} disabled={dl === d.id} style={{ padding: "7px 14px", background: accent, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: dl === d.id ? "default" : "pointer", flexShrink: 0, opacity: dl === d.id ? .7 : 1 }}>{dl === d.id ? "Opening…" : "View"}</button>
                 </div>
               ))}
             </div>

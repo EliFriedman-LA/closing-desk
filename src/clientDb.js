@@ -16,3 +16,7 @@ async function post(path, body) {
 export function getClientPortal(token) {
   return post("/api/client-portal", { token });
 }
+
+export function getClientDocUrl(token, docId) {
+  return post("/api/client-doc", { token, doc_id: docId });
+}

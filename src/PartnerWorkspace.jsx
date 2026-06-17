@@ -14,7 +14,7 @@ import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, 
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
 import { DOC_TOKENS, TOKEN_LABELS, buildMergeData, generateDocs, downloadBlob } from "./partnerDocs.js";
-import { createClientLink, listClientLinks, revokeClientLink } from "./partnerDb.js";
+import { createClientLink, listClientLinks, revokeClientLink, setDocumentClientVisible } from "./partnerDb.js";
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0", FIRM_DEFAULT = "#0f5132";
 
@@ -439,6 +439,11 @@ function DocumentsPanel({ matter, reloadKey, onGenerate }) {
     if (!window.confirm(`Delete "${doc.name}"?`)) return;
     try { await deleteDocument(doc); await load(); } catch (e) { setErr(e.message || String(e)); }
   };
+  const toggleShare = async (doc) => {
+    const next = !doc.client_visible;
+    setDocs((p) => p.map((x) => x.id === doc.id ? { ...x, client_visible: next } : x));
+    try { await setDocumentClientVisible(doc.id, next); } catch (e) { setErr(e.message || String(e)); load(); }
+  };
 
   const fmtSize = (n) => !n ? "" : n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(0) + " KB" : (n / 1048576).toFixed(1) + " MB";
   const fmtDate = (s) => { try { return new Date(s).toLocaleDateString(); } catch { return ""; } };
@@ -469,6 +474,7 @@ function DocumentsPanel({ matter, reloadKey, onGenerate }) {
                 <div style={{ fontSize: 11, color: MUTED }}>{[fmtSize(d.size), fmtDate(d.created_at)].filter(Boolean).join(" · ")}</div>
               </div>
               <span style={d.side === "lakeland" ? tag("#e8f3ff", "#0f6fd1") : tag("#f1f5f9", "#475569")}>{d.side === "lakeland" ? "Lakeland" : "You"}</span>
+              <button onClick={() => toggleShare(d)} title="Show in the client portal" style={{ padding: "5px 10px", background: d.client_visible ? "#ecfdf5" : "#fff", border: `1px solid ${d.client_visible ? "#a7f3d0" : LINE}`, color: d.client_visible ? "#065f46" : MUTED, borderRadius: 6, fontSize: 11.5, fontWeight: 600, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>{d.client_visible ? "Shared ✓" : "Share"}</button>
               <button onClick={() => open(d)} style={{ padding: "5px 10px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 6, fontSize: 11.5, fontWeight: 500, cursor: "pointer" }}>Open</button>
               {d.side === "firm" && <button onClick={() => remove(d)} title="Delete" style={{ padding: "5px 8px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 11.5, cursor: "pointer" }}>✕</button>}
             </div>

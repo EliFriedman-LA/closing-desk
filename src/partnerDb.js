@@ -385,3 +385,10 @@ export async function revokeClientLink(id) {
     .update({ revoked_at: new Date().toISOString() }).eq("id", id);
   if (error) throw error;
 }
+
+// Toggle whether a document is visible in the client portal (Phase 4.0b).
+export async function setDocumentClientVisible(id, visible) {
+  const { error } = await supabase.from("file_documents")
+    .update({ client_visible: !!visible }).eq("id", id);
+  if (error) throw error;
+}
