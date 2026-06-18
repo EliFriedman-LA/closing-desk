@@ -618,3 +618,20 @@ export async function saveMatterQuote(id, quote) {
   if (error) throw error;
   return data;
 }
+
+/* ---------------- Firm logo / branding (Phase R1b) ---------------- */
+export async function uploadFirmLogo(firmId, file) {
+  const ext = ((file.name || "").split(".").pop() || "png").toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
+  const path = `${firmId}/logo.${ext}`;
+  const { error: upErr } = await supabase.storage.from("firm-logos").upload(path, file, { upsert: true, cacheControl: "3600", contentType: file.type || undefined });
+  if (upErr) throw upErr;
+  const { data: pub } = supabase.storage.from("firm-logos").getPublicUrl(path);
+  const url = (pub && pub.publicUrl ? pub.publicUrl : "") + "?t=" + Date.now();
+  const { error } = await supabase.rpc("set_firm_logo", { p_url: url });
+  if (error) throw error;
+  return url;
+}
+export async function removeFirmLogo() {
+  const { error } = await supabase.rpc("set_firm_logo", { p_url: null });
+  if (error) throw error;
+}

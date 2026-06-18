@@ -14,7 +14,7 @@ import EmailAssistant from "./PartnerEmailAssistant.jsx";
 import { listNotifications, markNotificationRead, markNotificationsRead, myReadNotificationIds, listOpenDeadlines } from "./partnerDb.js";
 import { teamMembers, teamPendingInvites, teamInvite, teamSetRole, teamRemove, teamRevokeInvite } from "./partnerDb.js";
 import { TASK_ANCHORS, TASK_TYPES, listTaskTemplates, createTaskTemplate, updateTaskTemplate, deleteTaskTemplate, seedDefaultTaskTemplates, listMatterTasks, createMatterTask, updateMatterTask, deleteMatterTask, generateTasks, myOpenTasks } from "./partnerDb.js";
-import { aiAssist, setMatterArchived, saveMatterQuote } from "./partnerDb.js";
+import { aiAssist, setMatterArchived, saveMatterQuote, uploadFirmLogo, removeFirmLogo } from "./partnerDb.js";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
@@ -41,6 +41,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
   const [notifs, setNotifs] = useState([]);
   const [readIds, setReadIds] = useState(new Set());
   const [showArchived, setShowArchived] = useState(false);
+  const [logoUrl, setLogoUrl] = useState((ctx.firm && ctx.firm.logo_url) || "");
 
   const load = async () => {
     setLoading(true);
@@ -157,7 +158,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
           {navItem("team", "Team", "◑")}
         </nav>
         <div style={{ margin: "10px 12px 14px", padding: "11px 12px", background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 11, display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 30, height: 30, borderRadius: 7, background: accent, color: "#fff", display: "grid", placeItems: "center", fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 13 }}>{initials}</div>
+          <div style={{ width: 30, height: 30, borderRadius: 7, background: logoUrl ? "#fff" : accent, color: "#fff", display: "grid", placeItems: "center", fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 13, overflow: "hidden", flexShrink: 0 }}>{logoUrl ? <img src={logoUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : initials}</div>
           <div style={{ minWidth: 0 }}>
             <div style={{ color: "#fff", fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firm.name}</div>
             <div onClick={onSignOut} style={{ fontSize: 11, color: "#8fb0d4", cursor: "pointer" }}>Sign out</div>
@@ -202,7 +203,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
                           : page === "emailassistant"
                             ? <EmailAssistant firmId={firm.id} />
                             : page === "team"
-                              ? <Team firm={firm} myRole={myRole} myEmail={email} />
+                              ? <Team firm={firm} myRole={myRole} myEmail={email} logoUrl={logoUrl} onLogoChange={setLogoUrl} />
                               : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} showArchived={showArchived} onToggleArchived={() => setShowArchived((s) => !s)} archivedCount={archivedCount} />}
         </main>
       </div>
@@ -2070,7 +2071,7 @@ function PlaceOrderModal({ matter, onClose, onPlaced }) {
 const ROLE_OPTS = ["attorney", "paralegal", "admin"];
 const roleStyle = { attorney: { bg: "#e8f3ff", c: "#0f6fd1" }, admin: { bg: "#f5f3ff", c: "#6d28d9" }, paralegal: { bg: "#f1f5f9", c: "#475569" } };
 
-function Team({ firm, myRole, myEmail }) {
+function Team({ firm, myRole, myEmail, logoUrl, onLogoChange }) {
   const manager = myRole === "attorney" || myRole === "admin";
   const [members, setMembers] = useState([]);
   const [invites, setInvites] = useState([]);
@@ -2080,6 +2081,24 @@ function Team({ firm, myRole, myEmail }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState("");
+  const [logoBusy, setLogoBusy] = useState(false);
+  const logoRef = useRef(null);
+
+  const onLogoFile = async (file) => {
+    if (!file) return;
+    if (file.size > 2_000_000) { alert("Please use a logo under 2 MB."); return; }
+    setLogoBusy(true);
+    try { const url = await uploadFirmLogo(firm.id, file); onLogoChange && onLogoChange(url); }
+    catch (e) { alert(e.message || String(e)); }
+    setLogoBusy(false);
+    if (logoRef.current) logoRef.current.value = "";
+  };
+  const onLogoRemove = async () => {
+    if (!window.confirm("Remove your firm logo?")) return;
+    setLogoBusy(true);
+    try { await removeFirmLogo(); onLogoChange && onLogoChange(""); } catch (e) { alert(e.message || String(e)); }
+    setLogoBusy(false);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -2113,6 +2132,21 @@ function Team({ firm, myRole, myEmail }) {
     <div style={{ maxWidth: 760 }}>
       <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Team</div>
       <div style={{ color: MUTED, fontSize: 13.5, margin: "4px 0 18px" }}>Everyone in your firm's workspace. {manager ? "Invite teammates and set what they can do." : "Ask an attorney or admin to manage members."}</div>
+
+      {manager && (
+        <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginBottom: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: NV, marginBottom: 4 }}>Firm logo</div>
+          <div style={{ fontSize: 12, color: MUTED, marginBottom: 12 }}>Shown in your workspace and on the client portal your clients see. PNG or SVG with a transparent background works best.</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ width: 64, height: 64, borderRadius: 12, border: `1px solid ${LINE}`, background: "#f8fafc", display: "grid", placeItems: "center", overflow: "hidden", flexShrink: 0 }}>
+              {logoUrl ? <img src={logoUrl} alt="Firm logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 11, color: "#9ca3af" }}>No logo</span>}
+            </div>
+            <input ref={logoRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" onChange={(e) => onLogoFile(e.target.files && e.target.files[0])} style={{ display: "none" }} />
+            <button onClick={() => logoRef.current && logoRef.current.click()} disabled={logoBusy} style={{ padding: "8px 15px", background: logoBusy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: logoBusy ? "default" : "pointer" }}>{logoBusy ? "Uploading…" : (logoUrl ? "Replace logo" : "Upload logo")}</button>
+            {logoUrl && <button onClick={onLogoRemove} disabled={logoBusy} style={{ background: "none", border: "none", color: "#b91c1c", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Remove</button>}
+          </div>
+        </div>
+      )}
 
       {manager && (
         <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginBottom: 16 }}>

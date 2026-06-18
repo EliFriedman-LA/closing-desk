@@ -2,8 +2,8 @@
 // Rendered (via partnerMain) when the path is /c/<token>. No login: the token
 // in the URL is validated server-side; this view only shows what the endpoint returns.
 
-import React, { useEffect, useState, useRef } from "react";
-import { getClientPortal, getClientDocUrl, getClientMessages, sendClientMessage, uploadClientFile } from "./clientDb.js";
+import React, { useEffect, useState } from "react";
+import { getClientPortal, getClientDocUrl } from "./clientDb.js";
 
 const STAGES = ["Order", "Title search", "Commitment", "Clear to close", "Funded", "Recorded", "Policy"];
 
@@ -38,21 +38,6 @@ export default function ClientPortal() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const [dl, setDl] = useState(""); // id of doc currently being fetched
-  const [uploading, setUploading] = useState(false);
-  const fileRef = useRef(null);
-
-  const reload = () => getClientPortal(token).then((d) => setData(d)).catch(() => {});
-
-  const onUpload = async (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (fileRef.current) fileRef.current.value = "";
-    if (!file) return;
-    if (file.size > 25 * 1024 * 1024) { alert("Files must be 25 MB or smaller."); return; }
-    setUploading(true);
-    try { await uploadClientFile(token, file); await reload(); }
-    catch (err) { alert(err.message || "Upload failed."); }
-    setUploading(false);
-  };
 
   const openDoc = async (docId) => {
     setDl(docId);
@@ -102,7 +87,6 @@ export default function ClientPortal() {
   }
 
   const { firm, matter, deadlines, documents } = data;
-  const settings = data.settings || {};
   const stage = Math.max(0, Math.min(STAGES.length - 1, matter.stage || 0));
   const pct = Math.round((stage / (STAGES.length - 1)) * 100);
   const loc = [matter.town, matter.state].filter(Boolean).join(", ");
@@ -114,6 +98,7 @@ export default function ClientPortal() {
     <Shell>
       <div style={{ background: accent, color: "#fff", padding: "26px 24px" }}>
         <div style={{ maxWidth: 720, margin: "0 auto" }}>
+          {firm.logo_url && <img src={firm.logo_url} alt="" style={{ height: 44, maxWidth: 220, objectFit: "contain", marginBottom: 12, display: "block" }} />}
           <div style={{ fontFamily: "Fraunces, Georgia, serif", fontSize: 24, fontWeight: 600, lineHeight: 1.1 }}>{firm.name || "Closing portal"}</div>
           <div style={{ fontSize: 13.5, opacity: .92, marginTop: 4 }}>Your closing portal</div>
         </div>
@@ -174,93 +159,28 @@ export default function ClientPortal() {
           </div>
         )}
 
-        {((documents && documents.length > 0) || settings.allow_upload) && (
+        {documents && documents.length > 0 && (
           <div style={card}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: documents && documents.length ? 4 : 0 }}>
-              <div style={sectionTitle}>Documents</div>
-              {settings.allow_upload && (
-                <>
-                  <input ref={fileRef} type="file" onChange={onUpload} style={{ display: "none" }} />
-                  <button onClick={() => fileRef.current && fileRef.current.click()} disabled={uploading} style={{ padding: "7px 14px", background: uploading ? "#9ca3af" : accent, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: uploading ? "default" : "pointer" }}>{uploading ? "Uploading…" : "⬆ Upload"}</button>
-                </>
-              )}
-            </div>
-            {(!documents || documents.length === 0)
-              ? <div style={{ fontSize: 13, color: MUTED, padding: "10px 0 2px" }}>No documents yet.{settings.allow_upload ? " Use Upload to send a file to your closing team." : ""}</div>
-              : <div>
-                {documents.map((d, i) => (
-                  <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 0", borderTop: i ? `1px solid #eef1f6` : "none" }}>
-                    <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, background: shade(accent, .86), color: accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>▤</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: NV, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
-                      <div style={{ fontSize: 11.5, color: MUTED }}>{fmtDate(d.created_at)}</div>
-                    </div>
-                    <button onClick={() => openDoc(d.id)} disabled={dl === d.id} style={{ padding: "7px 14px", background: accent, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: dl === d.id ? "default" : "pointer", flexShrink: 0, opacity: dl === d.id ? .7 : 1 }}>{dl === d.id ? "Opening…" : "View"}</button>
+            <div style={sectionTitle}>Documents</div>
+            <div>
+              {documents.map((d, i) => (
+                <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 0", borderTop: i ? `1px solid #eef1f6` : "none" }}>
+                  <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, background: shade(accent, .86), color: accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>▤</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: NV, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                    <div style={{ fontSize: 11.5, color: MUTED }}>{fmtDate(d.created_at)}</div>
                   </div>
-                ))}
-              </div>}
+                  <button onClick={() => openDoc(d.id)} disabled={dl === d.id} style={{ padding: "7px 14px", background: accent, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: dl === d.id ? "default" : "pointer", flexShrink: 0, opacity: dl === d.id ? .7 : 1 }}>{dl === d.id ? "Opening…" : "View"}</button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
-
-        {settings.allow_messaging && <ClientMessages token={token} accent={accent} card={card} sectionTitle={sectionTitle} NV={NV} MUTED={MUTED} LINE={LINE} />}
 
         <div style={{ textAlign: "center", fontSize: 11.5, color: "#9aa7b8", marginTop: 8 }}>
           Secure closing portal{firm.name ? ` · ${firm.name}` : ""}
         </div>
       </div>
     </Shell>
-  );
-}
-
-function ClientMessages({ token, accent, card, sectionTitle, NV, MUTED, LINE }) {
-  const [msgs, setMsgs] = React.useState([]);
-  const [text, setText] = React.useState("");
-  const [loading, setLoading] = React.useState(true);
-  const [sending, setSending] = React.useState(false);
-  const [err, setErr] = React.useState("");
-
-  React.useEffect(() => {
-    let active = true;
-    getClientMessages(token)
-      .then((d) => { if (active) { setMsgs(d.messages || []); setLoading(false); } })
-      .catch(() => { if (active) { setLoading(false); } });
-    return () => { active = false; };
-  }, [token]);
-
-  const send = async () => {
-    const t = text.trim();
-    if (!t) return;
-    setSending(true); setErr("");
-    try {
-      const d = await sendClientMessage(token, t);
-      setMsgs(d.messages || []);
-      setText("");
-    } catch (e) { setErr(e.message || "Couldn't send."); }
-    setSending(false);
-  };
-  const fmtTime = (s) => { try { return new Date(s).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } };
-
-  return (
-    <div style={card}>
-      <div style={sectionTitle}>Messages</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto", marginBottom: 12 }}>
-        {loading ? <div style={{ fontSize: 13, color: MUTED }}>Loading…</div>
-          : msgs.length === 0 ? <div style={{ fontSize: 13, color: MUTED, padding: "6px 0" }}>No messages yet. Send your closing team a note below.</div>
-            : msgs.map((m, i) => {
-              const mine = m.sender === "client";
-              return (
-                <div key={i} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "82%" }}>
-                  <div style={{ background: mine ? accent : "#f1f5f9", color: mine ? "#fff" : NV, borderRadius: 14, padding: "9px 13px", fontSize: 13.5, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.body}</div>
-                  <div style={{ fontSize: 10.5, color: "#9aa7b8", marginTop: 3, textAlign: mine ? "right" : "left" }}>{mine ? "You" : "Closing team"} · {fmtTime(m.created_at)}</div>
-                </div>
-              );
-            })}
-      </div>
-      {err && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 6 }}>{err}</div>}
-      <div style={{ display: "flex", gap: 8 }}>
-        <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} rows={2} placeholder="Write a message…" style={{ flex: 1, boxSizing: "border-box", border: `1px solid ${LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13.5, fontFamily: "inherit", outline: "none", resize: "none" }} />
-        <button onClick={send} disabled={sending || !text.trim()} style={{ padding: "0 18px", background: text.trim() ? accent : "#cbd5e1", color: "#fff", border: "none", borderRadius: 10, fontSize: 13.5, fontWeight: 600, cursor: text.trim() ? "pointer" : "default" }}>{sending ? "…" : "Send"}</button>
-      </div>
-    </div>
   );
 }
