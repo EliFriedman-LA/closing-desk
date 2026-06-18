@@ -11,6 +11,7 @@ import {
 } from "./partnerDb.js";
 import Contacts from "./PartnerContacts.jsx";
 import EmailAssistant from "./PartnerEmailAssistant.jsx";
+import { listNotifications, markNotificationRead, markAllNotificationsRead } from "./partnerDb.js";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
@@ -33,6 +34,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
   const [query, setQuery] = useState("");
   const [navOpen, setNavOpen] = useState(false);
   const [unreads, setUnreads] = useState({});
+  const [notifs, setNotifs] = useState([]);
 
   const load = async () => {
     setLoading(true);
@@ -40,11 +42,20 @@ export default function Workspace({ ctx, email, onSignOut }) {
     setLoading(false);
   };
   const loadUnreads = async () => { try { setUnreads(await listUnreads()); } catch (e) { /* ignore */ } };
+  const loadNotifs = async () => { try { setNotifs(await listNotifications()); } catch (e) { /* ignore */ } };
   useEffect(() => {
-    load(); loadUnreads();
-    const id = setInterval(loadUnreads, 25000);
+    load(); loadUnreads(); loadNotifs();
+    const id = setInterval(() => { loadUnreads(); loadNotifs(); }, 25000);
     return () => clearInterval(id);
   }, []);
+
+  const openNotif = async (n) => {
+    try { if (!n.read_at) { await markNotificationRead(n.id); setNotifs((p) => p.map((x) => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)); } } catch (e) { /* ignore */ }
+    if (n.matter_id) { setPage("matters"); setSelectedId(n.matter_id); }
+  };
+  const markAllNotifs = async () => {
+    try { await markAllNotificationsRead(); const now = new Date().toISOString(); setNotifs((p) => p.map((x) => x.read_at ? x : { ...x, read_at: now })); } catch (e) { /* ignore */ }
+  };
 
   const selected = matters.find((m) => m.id === selectedId) || null;
   const filtered = useMemo(() => {
@@ -131,10 +142,13 @@ export default function Workspace({ ctx, email, onSignOut }) {
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         <header style={{ height: 60, background: "#fff", borderBottom: `1px solid ${LINE}`, display: "flex", alignItems: "center", gap: 14, padding: "0 22px", position: "sticky", top: 0, zIndex: 10 }}>
           <button onClick={() => setNavOpen((s) => !s)} className="cd-menu" style={{ display: "none", background: "none", border: "none", fontSize: 20, color: NV, cursor: "pointer" }}>☰</button>
-          {page !== "contacts" && <>
+          {page !== "contacts" && (
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search matters…" style={{ flex: 1, maxWidth: 380, padding: "9px 12px", border: `1px solid ${LINE}`, borderRadius: 9, background: "#f8fafc", fontSize: 13.5 }} />
-            <button onClick={() => setShowNew(true)} style={{ marginLeft: "auto", padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ New matter</button>
-          </>}
+          )}
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+            <NotificationBell items={notifs} onOpenItem={openNotif} onMarkAll={markAllNotifs} />
+            {page !== "contacts" && <button onClick={() => setShowNew(true)} style={{ padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ New matter</button>}
+          </div>
         </header>
 
         <main style={{ padding: "24px 26px 60px", maxWidth: 1100, width: "100%" }}>
@@ -1594,6 +1608,52 @@ function PlaceOrderModal({ matter, onClose, onPlaced }) {
           <button onClick={submit} disabled={busy} style={{ width: "100%", marginTop: 16, padding: "11px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 14, cursor: busy ? "default" : "pointer" }}>{busy ? "Sending…" : "Send order to Lakeland"}</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------------- Notification bell ---------------- */
+function NotificationBell({ items, onOpenItem, onMarkAll }) {
+  const [open, setOpen] = useState(false);
+  const unread = items.filter((n) => !n.read_at).length;
+  const fmt = (s) => {
+    try {
+      const d = new Date(s), diff = (Date.now() - d.getTime()) / 1000;
+      if (diff < 60) return "just now";
+      if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+      if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    } catch (e) { return ""; }
+  };
+  return (
+    <div style={{ position: "relative" }}>
+      <button onClick={() => setOpen((s) => !s)} aria-label="Notifications" style={{ position: "relative", width: 38, height: 38, display: "grid", placeItems: "center", background: "none", border: `1px solid ${LINE}`, borderRadius: 9, cursor: "pointer", color: NV }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>
+        {unread > 0 && <span style={{ position: "absolute", top: -5, right: -5, background: "#ef4444", color: "#fff", fontSize: 10, fontWeight: 700, minWidth: 17, height: 17, borderRadius: 9, display: "grid", placeItems: "center", padding: "0 4px" }}>{unread > 99 ? "99+" : unread}</span>}
+      </button>
+      {open && <>
+        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+        <div style={{ position: "absolute", right: 0, top: 46, width: 340, maxWidth: "86vw", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 12, boxShadow: "0 10px 30px rgba(16,32,56,.14)", zIndex: 41, overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", borderBottom: `1px solid ${LINE}` }}>
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: NV }}>Notifications</span>
+            {unread > 0 && <button onClick={onMarkAll} style={{ fontSize: 12, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>Mark all read</button>}
+          </div>
+          <div style={{ maxHeight: 380, overflowY: "auto" }}>
+            {items.length === 0
+              ? <div style={{ padding: "26px 16px", textAlign: "center", color: MUTED, fontSize: 12.5 }}>You're all caught up.</div>
+              : items.map((n) => (
+                <div key={n.id} onClick={() => { onOpenItem(n); setOpen(false); }} style={{ display: "flex", gap: 10, padding: "11px 14px", borderTop: "1px solid #eef1f6", cursor: "pointer", background: n.read_at ? "#fff" : "#f5faff" }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: n.read_at ? "transparent" : BL, marginTop: 5, flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: NV }}>{n.title || "Update"}</div>
+                    {n.detail && <div style={{ fontSize: 12, color: MUTED, marginTop: 1 }}>{n.detail}</div>}
+                    <div style={{ fontSize: 11, color: "#9aa7b8", marginTop: 2 }}>{fmt(n.created_at)}</div>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      </>}
     </div>
   );
 }

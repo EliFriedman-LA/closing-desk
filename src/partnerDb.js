@@ -445,3 +445,25 @@ export async function saveEmailAssistantProfile(firmId, answers, generatedPrompt
   const { error } = await supabase.from("email_assistant_profiles").upsert(row, { onConflict: "user_id" });
   if (error) throw error;
 }
+
+/* ---------------- Notifications (in-app) ---------------- */
+export async function listNotifications(limit = 30) {
+  const { data, error } = await supabase.from("notifications")
+    .select("*").order("created_at", { ascending: false }).limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+export async function notificationsUnreadCount() {
+  const { count, error } = await supabase.from("notifications")
+    .select("id", { count: "exact", head: true }).is("read_at", null);
+  if (error) return 0;
+  return count || 0;
+}
+export async function markNotificationRead(id) {
+  const { error } = await supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("id", id);
+  if (error) throw error;
+}
+export async function markAllNotificationsRead() {
+  const { error } = await supabase.from("notifications").update({ read_at: new Date().toISOString() }).is("read_at", null);
+  if (error) throw error;
+}
