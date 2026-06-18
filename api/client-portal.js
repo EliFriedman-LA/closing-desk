@@ -43,7 +43,7 @@ export default async function handler(req, res) {
       db.from("matters")
         .select("property_address, town, state, transaction_type, stage, contract_date, closing_date, lakeland_file_number")
         .eq("id", link.matter_id).maybeSingle(),
-      db.from("firms").select("name, brand_color").eq("id", link.firm_id).maybeSingle(),
+      db.from("firms").select("name, brand_color, logo_url").eq("id", link.firm_id).maybeSingle(),
       db.from("matter_deadlines").select("name, due_date, done")
         .eq("matter_id", link.matter_id)
         .order("due_date", { ascending: true, nullsFirst: false }),
@@ -58,7 +58,7 @@ export default async function handler(req, res) {
 
     res.status(200).json({
       label: link.label || "Client",
-      firm: { name: firm.name || "", brand_color: firm.brand_color || "#1B91FE" },
+      firm: { name: firm.name || "", brand_color: firm.brand_color || "#1B91FE", logo_url: firm.logo_url || "" },
       matter: {
         property_address: matter.property_address || "",
         town: matter.town || "",
