@@ -594,3 +594,20 @@ export async function myOpenTasks() {
   if (error) throw error;
   return data || [];
 }
+
+/* ---------------- AI assist (Phase A1) ---------------- */
+export async function aiAssist(payload) {
+  const r = await fetch("/api/ai-assist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const data = await r.json().catch(() => ({}));
+  if (!data || !data.ok) throw new Error((data && data.error) || "AI request failed");
+  return data.result;
+}
+
+/* ---------------- Archive (Phase R1) ---------------- */
+export async function setMatterArchived(id, archived) {
+  const { data, error } = await supabase.from("matters")
+    .update({ archived: !!archived, archived_at: archived ? new Date().toISOString() : null })
+    .eq("id", id).select().single();
+  if (error) throw error;
+  return data;
+}

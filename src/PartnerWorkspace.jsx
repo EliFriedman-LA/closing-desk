@@ -14,6 +14,7 @@ import EmailAssistant from "./PartnerEmailAssistant.jsx";
 import { listNotifications, markNotificationRead, markNotificationsRead, myReadNotificationIds, listOpenDeadlines } from "./partnerDb.js";
 import { teamMembers, teamPendingInvites, teamInvite, teamSetRole, teamRemove, teamRevokeInvite } from "./partnerDb.js";
 import { TASK_ANCHORS, TASK_TYPES, listTaskTemplates, createTaskTemplate, updateTaskTemplate, deleteTaskTemplate, seedDefaultTaskTemplates, listMatterTasks, createMatterTask, updateMatterTask, deleteMatterTask, generateTasks, myOpenTasks } from "./partnerDb.js";
+import { aiAssist, setMatterArchived } from "./partnerDb.js";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
@@ -39,6 +40,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
   const [unreads, setUnreads] = useState({});
   const [notifs, setNotifs] = useState([]);
   const [readIds, setReadIds] = useState(new Set());
+  const [showArchived, setShowArchived] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -75,25 +77,36 @@ export default function Workspace({ ctx, email, onSignOut }) {
   const selected = matters.find((m) => m.id === selectedId) || null;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return matters;
-    return matters.filter((m) =>
+    let list = showArchived ? matters.filter((m) => m.archived) : matters.filter((m) => !m.archived);
+    if (q) list = list.filter((m) =>
       [m.file_number, m.property_address, m.town, m.transaction_type, m.title_company_name]
         .some((v) => String(v || "").toLowerCase().includes(q))
     );
-  }, [matters, query]);
-  const openCount = matters.filter((m) => (m.stage || 0) < STAGES.length - 1).length;
+    return list;
+  }, [matters, query, showArchived]);
+  const archivedCount = matters.filter((m) => m.archived).length;
+  const openCount = matters.filter((m) => !m.archived && (m.stage || 0) < STAGES.length - 1).length;
   const lakelandCount = matters.filter((m) => m.title_provider === "lakeland").length;
 
-  const onCreate = async (payload) => {
+  const onCreate = async (payload, seed) => {
     const m = await createMatter(firm.id, payload);
     setShowNew(false);
     await load();
+    if (seed) {
+      try { await generateDeadlines(firm.id, m); } catch (e) { /* ignore */ }
+      try { await generateTasks(firm.id, m); } catch (e) { /* ignore */ }
+    }
     setSelectedId(m.id);
     setPage("matters");
   };
   const onStage = async (m, stage) => {
     const up = await updateMatter(m.id, { stage });
     setMatters((prev) => prev.map((x) => (x.id === m.id ? up : x)));
+  };
+  const onArchive = async (m) => {
+    const up = await setMatterArchived(m.id, !m.archived);
+    setMatters((prev) => prev.map((x) => (x.id === m.id ? up : x)));
+    setSelectedId(null);
   };
   const onDelete = async (m) => {
     if (!window.confirm(`Delete this matter${m.file_number ? " (" + m.file_number + ")" : ""}? This can't be undone.`)) return;
@@ -171,7 +184,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
 
         <main style={{ padding: "24px 26px 60px", maxWidth: 1100, width: "100%" }}>
           {selected
-            ? <MatterDetail matter={selected} firm={firm} email={email} onBack={() => setSelectedId(null)} onStage={onStage} onDelete={onDelete} onRefresh={load} onRead={loadUnreads} />
+            ? <MatterDetail matter={selected} firm={firm} email={email} onBack={() => setSelectedId(null)} onStage={onStage} onDelete={onDelete} onArchive={onArchive} onRefresh={load} onRead={loadUnreads} />
             : page === "dashboard"
               ? <Dashboard firm={firm} org={org} accent={accent} initials={initials} openCount={openCount} lakelandCount={lakelandCount} total={matters.length} recent={matters.slice(0, 5)} matters={matters} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} />
               : page === "contacts"
@@ -194,7 +207,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
                             ? <EmailAssistant firmId={firm.id} />
                             : page === "team"
                               ? <Team firm={firm} myRole={myRole} myEmail={email} />
-                              : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
+                              : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} showArchived={showArchived} onToggleArchived={() => setShowArchived((s) => !s)} archivedCount={archivedCount} />}
         </main>
       </div>
 
@@ -282,22 +295,25 @@ function Dashboard({ firm, org, accent, initials, openCount, lakelandCount, tota
 }
 
 /* ---------------- Matters list ---------------- */
-function MattersList({ loading, matters, total, unreads = {}, onOpen, onNew, query }) {
+function MattersList({ loading, matters, total, unreads = {}, onOpen, onNew, query, showArchived, onToggleArchived, archivedCount = 0 }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 18 }}>
         <div>
           <div style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: BL, fontWeight: 600 }}>Your practice</div>
-          <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Matters</div>
-          <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Every file — with Lakeland or not.</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>{showArchived ? "Archived" : "Matters"}</div>
+          <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>{showArchived ? "Closed and archived files." : "Every file — with Lakeland or not."}</div>
         </div>
-        <button onClick={onNew} style={{ padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ New matter</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {(archivedCount > 0 || showArchived) && <button onClick={onToggleArchived} style={{ fontSize: 12.5, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>{showArchived ? "← Active matters" : `Archived (${archivedCount})`}</button>}
+          {!showArchived && <button onClick={onNew} style={{ padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ New matter</button>}
+        </div>
       </div>
       <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14 }}>
         {loading
           ? <div style={{ padding: "26px 18px", color: "#9ca3af", fontSize: 13 }}>Loading…</div>
           : matters.length === 0
-            ? <div style={{ padding: "30px 18px", color: "#9ca3af", fontSize: 13, textAlign: "center" }}>{query ? "No matters match your search." : "No matters yet — open your first file with “New matter.”"}</div>
+            ? <div style={{ padding: "30px 18px", color: "#9ca3af", fontSize: 13, textAlign: "center" }}>{showArchived ? "No archived files." : (query ? "No matters match your search." : "No matters yet — open your first file with “New matter.”")}</div>
             : matters.map((m) => <MatterRow key={m.id} m={m} unread={unreads[m.id]} onOpen={onOpen} />)}
       </div>
     </div>
@@ -325,7 +341,7 @@ function MatterRow({ m, unread, onOpen }) {
 }
 
 /* ---------------- Matter detail ---------------- */
-function MatterDetail({ matter, firm, email, onBack, onStage, onDelete, onRefresh, onRead }) {
+function MatterDetail({ matter, firm, email, onBack, onStage, onDelete, onArchive, onRefresh, onRead }) {
   const conn = matter.title_provider === "lakeland";
   const linked = !!matter.lakeland_file_number;
   const [live, setLive] = useState(null);
@@ -382,10 +398,13 @@ function MatterDetail({ matter, firm, email, onBack, onStage, onDelete, onRefres
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: BL, fontWeight: 600 }}>{matter.file_number || "Matter"} · {matter.transaction_type || ""}</div>
-          <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 25, lineHeight: 1.1 }}>{matter.property_address || "(no address)"}</div>
+          <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 25, lineHeight: 1.1 }}>{matter.property_address || "(no address)"}{matter.archived && <span style={{ ...tag("#f1f5f9", "#475569"), marginLeft: 10, verticalAlign: "middle" }}>Archived</span>}</div>
           <div style={{ color: MUTED, fontSize: 13.5, marginTop: 3 }}>{matter.town || ""}</div>
         </div>
-        <button onClick={() => onDelete(matter)} style={{ padding: "7px 12px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 8, fontSize: 12.5, fontWeight: 500, cursor: "pointer" }}>Delete</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => onArchive(matter)} style={{ padding: "7px 12px", background: "#fff", border: `1px solid ${LINE}`, color: NV, borderRadius: 8, fontSize: 12.5, fontWeight: 500, cursor: "pointer" }}>{matter.archived ? "Unarchive" : "Archive"}</button>
+          <button onClick={() => onDelete(matter)} style={{ padding: "7px 12px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 8, fontSize: 12.5, fontWeight: 500, cursor: "pointer" }}>Delete</button>
+        </div>
       </div>
 
       {/* Tracker */}
@@ -480,6 +499,7 @@ function MatterDetail({ matter, firm, email, onBack, onStage, onDelete, onRefres
 
       <DeadlinesPanel matter={matter} onRefresh={onRefresh} />
       <TasksPanel matter={matter} />
+      <AIPanel matter={matter} firm={firm} />
 
       <ClientPortalPanel matter={matter} />
 
@@ -575,6 +595,108 @@ function DocumentsPanel({ matter, reloadKey, onGenerate }) {
 }
 
 /* ---------------- Deadlines panel (per matter) ---------------- */
+/* ---------------- AI assistant (Phase A1) ---------------- */
+function AIPanel({ matter, firm }) {
+  const [tool, setTool] = useState("letter");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [out, setOut] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [represents, setRepresents] = useState("the buyer");
+  const [pasteText, setPasteText] = useState("");
+  const fileRef = React.useRef(null);
+
+  const reset = () => { setOut(""); setErr(""); setCopied(false); };
+  const copy = () => { try { navigator.clipboard.writeText(out); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e) { /* ignore */ } };
+
+  const toBase64 = (file) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] || "");
+    r.onerror = () => reject(new Error("Couldn't read the file."));
+    r.readAsDataURL(file);
+  });
+
+  const draftLetter = async () => {
+    setBusy(true); reset();
+    try {
+      const result = await aiAssist({ task: "draft_letter", context: {
+        transaction_type: matter.transaction_type, property_address: matter.property_address, town: matter.town, state: matter.state,
+        buyer: matter.buyer_name, seller: matter.seller_name, lender: matter.lender_name,
+        contract_date: matter.contract_date, closing_date: matter.closing_date,
+        title_company: matter.title_company_name, firm_name: firm && firm.name, represents
+      } });
+      setOut(result);
+    } catch (e) { setErr(e.message || String(e)); }
+    setBusy(false);
+  };
+  const summarizeFile = async (file) => {
+    if (!file) return;
+    setBusy(true); reset();
+    try { setOut(await aiAssist({ task: "summarize", pdf: await toBase64(file) })); }
+    catch (e) { setErr(e.message || String(e)); }
+    setBusy(false);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+  const summarizeText = async () => {
+    const t = pasteText.trim(); if (!t) return;
+    setBusy(true); reset();
+    try { setOut(await aiAssist({ task: "summarize", text: t })); }
+    catch (e) { setErr(e.message || String(e)); }
+    setBusy(false);
+  };
+
+  const tabBtn = (k, label) => (
+    <button onClick={() => { setTool(k); reset(); }} style={{ padding: "6px 12px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 12.5, fontWeight: 600, background: tool === k ? BL : "#eef2f7", color: tool === k ? "#fff" : NV }}>{label}</button>
+  );
+  const inp = { border: `1px solid ${LINE}`, borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", outline: "none" };
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16, maxWidth: 620 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>AI assistant</div>
+        {tabBtn("letter", "Review letter")}
+        {tabBtn("summary", "Summarize doc")}
+      </div>
+
+      {tool === "letter" && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+            <label style={{ fontSize: 12.5, color: MUTED }}>We represent:</label>
+            <select value={represents} onChange={(e) => setRepresents(e.target.value)} style={{ ...inp, padding: "6px 9px" }}>
+              <option value="the buyer">the buyer / borrower</option>
+              <option value="the seller">the seller</option>
+            </select>
+            <button onClick={draftLetter} disabled={busy} style={{ padding: "8px 15px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>{busy ? "Drafting…" : "Draft attorney-review letter"}</button>
+          </div>
+          <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 8 }}>Uses this file's parties and dates. Always read and adjust before sending — it's a starting draft, not legal advice.</div>
+        </div>
+      )}
+
+      {tool === "summary" && (
+        <div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+            <button onClick={() => fileRef.current && fileRef.current.click()} disabled={busy} style={{ padding: "8px 15px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>{busy ? "Reading…" : "Upload a PDF"}</button>
+            <input ref={fileRef} type="file" accept="application/pdf" onChange={(e) => summarizeFile(e.target.files && e.target.files[0])} style={{ display: "none" }} />
+            <span style={{ fontSize: 12, color: MUTED }}>contract or title commitment</span>
+          </div>
+          <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder="…or paste the document text here" rows={3} style={{ ...inp, width: "100%", resize: "vertical", marginBottom: 8 }} />
+          <button onClick={summarizeText} disabled={busy || !pasteText.trim()} style={{ padding: "7px 13px", background: (busy || !pasteText.trim()) ? "#9ca3af" : NV, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: (busy || !pasteText.trim()) ? "default" : "pointer" }}>Summarize pasted text</button>
+        </div>
+      )}
+
+      {err && <div style={{ color: "#dc2626", fontSize: 12.5, marginTop: 10 }}>{err}</div>}
+      {out && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+            <button onClick={copy} style={{ fontSize: 12, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy"}</button>
+          </div>
+          <textarea value={out} onChange={(e) => setOut(e.target.value)} rows={tool === "letter" ? 16 : 10} style={{ width: "100%", border: `1px solid ${LINE}`, borderRadius: 10, padding: 12, fontSize: 13, lineHeight: 1.5, fontFamily: tool === "letter" ? "Georgia, serif" : "inherit", resize: "vertical", background: "#fcfdff", whiteSpace: "pre-wrap" }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------------- Tasks panel (matter detail) ---------------- */
 function TasksPanel({ matter }) {
   const [items, setItems] = useState([]);
@@ -2024,6 +2146,7 @@ function NewMatterModal({ onClose, onCreate }) {
   const [importing, setImporting] = useState(false);
   const [importErr, setImportErr] = useState("");
   const [importedNote, setImportedNote] = useState("");
+  const [wasImported, setWasImported] = useState(false);
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const fileRef = useRef(null);
@@ -2035,6 +2158,7 @@ function NewMatterModal({ onClose, onCreate }) {
     r.readAsDataURL(file);
   });
   const applyExtract = (d) => {
+    setWasImported(true);
     setF((p) => ({
       ...p,
       property_address: d.property_address || p.property_address,
@@ -2071,6 +2195,7 @@ function NewMatterModal({ onClose, onCreate }) {
 
   const submit = async () => {
     setSaving(true);
+    const seed = wasImported || !!(f.contract_date || f.closing_date);
     try {
       await onCreate({
         title_provider: provider,
@@ -2086,7 +2211,7 @@ function NewMatterModal({ onClose, onCreate }) {
         contract_date: f.contract_date || null,
         closing_date: f.closing_date || null,
         stage: 0
-      });
+      }, seed);
     } catch (e) {
       setSaving(false);
       alert("Couldn't create the matter: " + (e.message || e));
