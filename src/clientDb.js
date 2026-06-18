@@ -20,3 +20,10 @@ export function getClientPortal(token) {
 export function getClientDocUrl(token, docId) {
   return post("/api/client-doc", { token, doc_id: docId });
 }
+
+export function getClientMessages(token) {
+  return post("/api/client-messages", { token });
+}
+export function sendClientMessage(token, body) {
+  return post("/api/client-messages", { token, body });
+}

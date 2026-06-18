@@ -392,3 +392,24 @@ export async function setDocumentClientVisible(id, visible) {
     .update({ client_visible: !!visible }).eq("id", id);
   if (error) throw error;
 }
+
+/* ---------------- Client messages (Phase 4.1) ---------------- */
+export async function listClientMessages(matterId) {
+  const { data, error } = await supabase.from("client_messages")
+    .select("*").eq("matter_id", matterId).order("created_at", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+export async function sendClientMessageAsFirm(firmId, matterId, body) {
+  const { data, error } = await supabase.from("client_messages")
+    .insert({ firm_id: firmId, matter_id: matterId, sender: "firm", body, read_by_firm: true })
+    .select().single();
+  if (error) throw error;
+  return data;
+}
+export async function markClientMessagesRead(matterId) {
+  const { error } = await supabase.from("client_messages")
+    .update({ read_by_firm: true })
+    .eq("matter_id", matterId).eq("sender", "client").eq("read_by_firm", false);
+  if (error) throw error;
+}

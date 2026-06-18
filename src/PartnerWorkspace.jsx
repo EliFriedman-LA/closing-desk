@@ -14,7 +14,7 @@ import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, 
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
 import { DOC_TOKENS, TOKEN_LABELS, buildMergeData, generateDocs, downloadBlob } from "./partnerDocs.js";
-import { createClientLink, listClientLinks, revokeClientLink, setDocumentClientVisible } from "./partnerDb.js";
+import { createClientLink, listClientLinks, revokeClientLink, setDocumentClientVisible, listClientMessages, sendClientMessageAsFirm, markClientMessagesRead } from "./partnerDb.js";
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0", FIRM_DEFAULT = "#0f5132";
 
@@ -394,6 +394,8 @@ function MatterDetail({ matter, firm, email, onBack, onStage, onDelete, onRefres
       <DeadlinesPanel matter={matter} onRefresh={onRefresh} />
 
       <ClientPortalPanel matter={matter} />
+
+      <ClientMessagesPanel matter={matter} />
 
       <DocumentsPanel matter={matter} reloadKey={docsKey} onGenerate={() => setShowGen(true)} />
 
@@ -1102,6 +1104,67 @@ function ClientPortalPanel({ matter }) {
               </div>
             );
           })}
+    </div>
+  );
+}
+
+/* ---------------- Client messages panel (firm side, Phase 4.1) ---------------- */
+function ClientMessagesPanel({ matter }) {
+  const [msgs, setMsgs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState("");
+
+  const load = async () => {
+    try {
+      const m = await listClientMessages(matter.id);
+      setMsgs(m);
+      if (m.some((x) => x.sender === "client" && !x.read_by_firm)) {
+        try { await markClientMessagesRead(matter.id); } catch (e) { /* ignore */ }
+      }
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+  useEffect(() => { setLoading(true); load(); /* eslint-disable-next-line */ }, [matter.id]);
+
+  const send = async () => {
+    const t = text.trim();
+    if (!t) return;
+    setSending(true); setErr("");
+    try {
+      await sendClientMessageAsFirm(matter.firm_id, matter.id, t);
+      setText("");
+      await load();
+    } catch (e) { setErr(e.message || String(e)); }
+    setSending(false);
+  };
+  const fmtTime = (s) => { try { return new Date(s).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } };
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16, maxWidth: 560 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Client messages</div>
+      </div>
+      <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 12 }}>Visible to the client only on links where messaging is enabled.</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 300, overflowY: "auto", marginBottom: 12 }}>
+        {loading ? <div style={{ fontSize: 12.5, color: "#9ca3af" }}>Loading…</div>
+          : msgs.length === 0 ? <div style={{ fontSize: 12.5, color: "#9ca3af", padding: "6px 0" }}>No messages with the client yet.</div>
+            : msgs.map((m, i) => {
+              const firmMsg = m.sender === "firm";
+              return (
+                <div key={m.id || i} style={{ alignSelf: firmMsg ? "flex-end" : "flex-start", maxWidth: "82%" }}>
+                  <div style={{ background: firmMsg ? BL : "#f1f5f9", color: firmMsg ? "#fff" : NV, borderRadius: 14, padding: "8px 12px", fontSize: 13, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.body}</div>
+                  <div style={{ fontSize: 10.5, color: "#9aa7b8", marginTop: 3, textAlign: firmMsg ? "right" : "left" }}>{firmMsg ? "You" : "Client"} · {fmtTime(m.created_at)}</div>
+                </div>
+              );
+            })}
+      </div>
+      {err && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 6 }}>{err}</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} rows={2} placeholder="Reply to the client…" style={{ flex: 1, boxSizing: "border-box", border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", outline: "none", resize: "none" }} />
+        <button onClick={send} disabled={sending || !text.trim()} style={{ padding: "0 16px", background: text.trim() ? BL : "#cbd5e1", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: text.trim() ? "pointer" : "default" }}>{sending ? "…" : "Send"}</button>
+      </div>
     </div>
   );
 }

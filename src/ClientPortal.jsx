@@ -3,7 +3,7 @@
 // in the URL is validated server-side; this view only shows what the endpoint returns.
 
 import React, { useEffect, useState } from "react";
-import { getClientPortal, getClientDocUrl } from "./clientDb.js";
+import { getClientPortal, getClientDocUrl, getClientMessages, sendClientMessage } from "./clientDb.js";
 
 const STAGES = ["Order", "Title search", "Commitment", "Clear to close", "Funded", "Recorded", "Policy"];
 
@@ -87,6 +87,7 @@ export default function ClientPortal() {
   }
 
   const { firm, matter, deadlines, documents } = data;
+  const settings = data.settings || {};
   const stage = Math.max(0, Math.min(STAGES.length - 1, matter.stage || 0));
   const pct = Math.round((stage / (STAGES.length - 1)) * 100);
   const loc = [matter.town, matter.state].filter(Boolean).join(", ");
@@ -176,10 +177,65 @@ export default function ClientPortal() {
           </div>
         )}
 
+        {settings.allow_messaging && <ClientMessages token={token} accent={accent} card={card} sectionTitle={sectionTitle} NV={NV} MUTED={MUTED} LINE={LINE} />}
+
         <div style={{ textAlign: "center", fontSize: 11.5, color: "#9aa7b8", marginTop: 8 }}>
           Secure closing portal{firm.name ? ` · ${firm.name}` : ""}
         </div>
       </div>
     </Shell>
+  );
+}
+
+function ClientMessages({ token, accent, card, sectionTitle, NV, MUTED, LINE }) {
+  const [msgs, setMsgs] = React.useState([]);
+  const [text, setText] = React.useState("");
+  const [loading, setLoading] = React.useState(true);
+  const [sending, setSending] = React.useState(false);
+  const [err, setErr] = React.useState("");
+
+  React.useEffect(() => {
+    let active = true;
+    getClientMessages(token)
+      .then((d) => { if (active) { setMsgs(d.messages || []); setLoading(false); } })
+      .catch(() => { if (active) { setLoading(false); } });
+    return () => { active = false; };
+  }, [token]);
+
+  const send = async () => {
+    const t = text.trim();
+    if (!t) return;
+    setSending(true); setErr("");
+    try {
+      const d = await sendClientMessage(token, t);
+      setMsgs(d.messages || []);
+      setText("");
+    } catch (e) { setErr(e.message || "Couldn't send."); }
+    setSending(false);
+  };
+  const fmtTime = (s) => { try { return new Date(s).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } };
+
+  return (
+    <div style={card}>
+      <div style={sectionTitle}>Messages</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto", marginBottom: 12 }}>
+        {loading ? <div style={{ fontSize: 13, color: MUTED }}>Loading…</div>
+          : msgs.length === 0 ? <div style={{ fontSize: 13, color: MUTED, padding: "6px 0" }}>No messages yet. Send your closing team a note below.</div>
+            : msgs.map((m, i) => {
+              const mine = m.sender === "client";
+              return (
+                <div key={i} style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "82%" }}>
+                  <div style={{ background: mine ? accent : "#f1f5f9", color: mine ? "#fff" : NV, borderRadius: 14, padding: "9px 13px", fontSize: 13.5, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.body}</div>
+                  <div style={{ fontSize: 10.5, color: "#9aa7b8", marginTop: 3, textAlign: mine ? "right" : "left" }}>{mine ? "You" : "Closing team"} · {fmtTime(m.created_at)}</div>
+                </div>
+              );
+            })}
+      </div>
+      {err && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 6 }}>{err}</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} rows={2} placeholder="Write a message…" style={{ flex: 1, boxSizing: "border-box", border: `1px solid ${LINE}`, borderRadius: 10, padding: "9px 12px", fontSize: 13.5, fontFamily: "inherit", outline: "none", resize: "none" }} />
+        <button onClick={send} disabled={sending || !text.trim()} style={{ padding: "0 18px", background: text.trim() ? accent : "#cbd5e1", color: "#fff", border: "none", borderRadius: 10, fontSize: 13.5, fontWeight: 600, cursor: text.trim() ? "pointer" : "default" }}>{sending ? "…" : "Send"}</button>
+      </div>
+    </div>
   );
 }
