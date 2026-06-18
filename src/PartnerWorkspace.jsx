@@ -14,7 +14,7 @@ import EmailAssistant from "./PartnerEmailAssistant.jsx";
 import { listNotifications, markNotificationRead, markNotificationsRead, myReadNotificationIds, listOpenDeadlines } from "./partnerDb.js";
 import { teamMembers, teamPendingInvites, teamInvite, teamSetRole, teamRemove, teamRevokeInvite } from "./partnerDb.js";
 import { TASK_ANCHORS, TASK_TYPES, listTaskTemplates, createTaskTemplate, updateTaskTemplate, deleteTaskTemplate, seedDefaultTaskTemplates, listMatterTasks, createMatterTask, updateMatterTask, deleteMatterTask, generateTasks, myOpenTasks } from "./partnerDb.js";
-import { aiAssist, setMatterArchived } from "./partnerDb.js";
+import { aiAssist, setMatterArchived, saveMatterQuote } from "./partnerDb.js";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
@@ -155,10 +155,6 @@ export default function Workspace({ ctx, email, onSignOut }) {
           {navItem("doctemplates", "Doc templates", "❏")}
           {navItem("emailassistant", "Email assistant", "✉")}
           {navItem("team", "Team", "◑")}
-          <div style={{ fontSize: 10, letterSpacing: ".09em", textTransform: "uppercase", color: "#6f93bb", padding: "16px 12px 6px", fontWeight: 600 }}>Coming soon</div>
-          {["✉ Smart Inbox", "✶ AI contract import"].map((t) => (
-            <div key={t} style={{ padding: "9px 12px", fontSize: 13.5, color: "#5d7da6" }}>{t}</div>
-          ))}
         </nav>
         <div style={{ margin: "10px 12px 14px", padding: "11px 12px", background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 11, display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 30, height: 30, borderRadius: 7, background: accent, color: "#fff", display: "grid", placeItems: "center", fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 13 }}>{initials}</div>
@@ -194,7 +190,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
                   : page === "calendar"
                   ? <Calendar onOpen={(id) => setSelectedId(id)} />
                   : page === "quotes"
-                    ? <QuotesCalculator firm={firm} onEditFees={() => go("feesetup")} />
+                    ? <QuotesCalculator firm={firm} matters={matters} onEditFees={() => go("feesetup")} onSaved={load} />
                     : page === "deadlinesetup"
                       ? <DeadlineSetup firmId={firm.id} />
                       : page === "checklists"
@@ -500,6 +496,7 @@ function MatterDetail({ matter, firm, email, onBack, onStage, onDelete, onArchiv
       <DeadlinesPanel matter={matter} onRefresh={onRefresh} />
       <TasksPanel matter={matter} />
       <AIPanel matter={matter} firm={firm} />
+      {matter.saved_quote && <SavedQuotePanel quote={matter.saved_quote} />}
 
       <ClientPortalPanel matter={matter} />
 
@@ -595,6 +592,36 @@ function DocumentsPanel({ matter, reloadKey, onGenerate }) {
 }
 
 /* ---------------- Deadlines panel (per matter) ---------------- */
+/* ---------------- Saved quote (matter detail) ---------------- */
+function SavedQuotePanel({ quote }) {
+  const [open, setOpen] = useState(false);
+  if (!quote) return null;
+  const when = (() => { try { return new Date(quote.saved_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); } catch (e) { return ""; } })();
+  const Row = ({ label, amount }) => (amount ? <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderTop: "1px solid #eef1f6", fontSize: 13 }}><span style={{ color: MUTED }}>{label}</span><span>{money(amount)}</span></div> : null);
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16, maxWidth: 560 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Saved quote</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ fontFamily: "Fraunces,serif", fontWeight: 700, fontSize: 18, color: NV }}>{money(quote.total || 0)}</div>
+          <button onClick={() => setOpen((s) => !s)} style={{ fontSize: 12, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>{open ? "Hide" : "Details"}</button>
+        </div>
+      </div>
+      <div style={{ fontSize: 11.5, color: MUTED, marginTop: 2 }}>{[quote.state, quote.ptype].filter(Boolean).join(" · ")}{when ? " · saved " + when : ""}</div>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          <Row label="Title premium" amount={quote.premium} />
+          <Row label="Search & exam" amount={quote.search} />
+          <Row label="Realty Transfer Fee" amount={quote.rtf} />
+          <Row label="Graduated Percent Fee" amount={quote.gpf} />
+          {(quote.fees || []).map((f, i) => <Row key={i} label={f.name} amount={f.amount} />)}
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0 0", borderTop: `1px solid ${LINE}`, marginTop: 4, fontSize: 14.5, fontWeight: 700 }}><span>Total</span><span>{money(quote.total || 0)}</span></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------------- AI assistant (Phase A1) ---------------- */
 function AIPanel({ matter, firm }) {
   const [tool, setTool] = useState("letter");
@@ -1063,7 +1090,10 @@ function DeadlineSetup({ firmId }) {
 }
 
 /* ---------------- Quotes calculator (Phase 3.3a, on-screen) ---------------- */
-function QuotesCalculator({ firm, onEditFees }) {
+function QuotesCalculator({ firm, matters = [], onEditFees, onSaved }) {
+  const [saveToId, setSaveToId] = useState("");
+  const [saveMsg, setSaveMsg] = useState("");
+  const [savingQ, setSavingQ] = useState(false);
   const states = Object.keys(STATE_RATES);
   const def = states.includes(firm && firm.default_state) ? firm.default_state : "NJ";
   const [state, setState] = useState(def);
@@ -1149,7 +1179,23 @@ function QuotesCalculator({ firm, onEditFees }) {
 
           <Line label="Estimated total" amount={total} strong />
         </div>
-        <div style={{ fontSize: 11, color: MUTED, marginTop: 12 }}>Estimate only — figures use Lakeland's current filed rates. Recording fees and firm charges aren't included yet (coming in 3.3b).</div>
+        {matters.filter((m) => !m.archived).length > 0 && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${LINE}`, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <select value={saveToId} onChange={(e) => { setSaveToId(e.target.value); setSaveMsg(""); }} style={{ ...fld, width: "auto", flex: "1 1 200px" }}>
+              <option value="">Save this quote to a file…</option>
+              {matters.filter((m) => !m.archived).map((m) => <option key={m.id} value={m.id}>{m.file_number ? m.file_number + " · " : ""}{m.property_address || "(no address)"}</option>)}
+            </select>
+            <button onClick={async () => {
+              if (!saveToId) return;
+              setSavingQ(true); setSaveMsg("");
+              const snapshot = { state, ptype, price, loan, prior, premium: q.premium || 0, search: q.search || 0, transfer, rtf: rtf ? rtf.amount : 0, gpf: gpf ? gpf.amount : 0, fees: fees.filter((f) => f.include).map((f) => ({ name: f.name, amount: Number(f.amount) || 0 })), feesTotal, total, lines: q.lines || [], saved_at: new Date().toISOString() };
+              try { await saveMatterQuote(saveToId, snapshot); setSaveMsg("Saved to file ✓"); onSaved && onSaved(); } catch (e) { setSaveMsg(e.message || String(e)); }
+              setSavingQ(false);
+            }} disabled={!saveToId || savingQ} style={{ padding: "9px 16px", background: (!saveToId || savingQ) ? "#9ca3af" : NV, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: (!saveToId || savingQ) ? "default" : "pointer" }}>{savingQ ? "Saving…" : "Save quote"}</button>
+            {saveMsg && <span style={{ fontSize: 12, color: saveMsg.includes("✓") ? "#16a34a" : "#dc2626", fontWeight: 600 }}>{saveMsg}</span>}
+          </div>
+        )}
+        <div style={{ fontSize: 11, color: MUTED, marginTop: 12 }}>Estimate only — figures use Lakeland's current filed rates. Confirm recording fees separately.</div>
       </div>
     </div>
   );

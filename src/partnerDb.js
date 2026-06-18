@@ -611,3 +611,10 @@ export async function setMatterArchived(id, archived) {
   if (error) throw error;
   return data;
 }
+
+/* ---------------- Save quote to matter (Phase R1b) ---------------- */
+export async function saveMatterQuote(id, quote) {
+  const { data, error } = await supabase.from("matters").update({ saved_quote: quote }).eq("id", id).select().single();
+  if (error) throw error;
+  return data;
+}
