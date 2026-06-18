@@ -427,3 +427,21 @@ export async function extractContract(payload) {
   if (!r.ok || !j.ok) throw new Error(j.error || `Extraction failed (${r.status})`);
   return j.data;
 }
+
+/* ---------------- Email Assistant questionnaire ---------------- */
+export async function getEmailAssistantProfile() {
+  const { data, error } = await supabase
+    .from("email_assistant_profiles")
+    .select("answers, generated_prompt")
+    .maybeSingle();
+  if (error && error.code !== "PGRST116") throw error;
+  return data || null;
+}
+export async function saveEmailAssistantProfile(firmId, answers, generatedPrompt) {
+  let uid = null;
+  try { const { data } = await supabase.auth.getUser(); uid = data && data.user && data.user.id; } catch (e) { /* ignore */ }
+  const row = { firm_id: firmId, answers, generated_prompt: generatedPrompt || null, updated_at: new Date().toISOString() };
+  if (uid) row.user_id = uid;
+  const { error } = await supabase.from("email_assistant_profiles").upsert(row, { onConflict: "user_id" });
+  if (error) throw error;
+}

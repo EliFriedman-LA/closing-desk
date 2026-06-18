@@ -10,6 +10,7 @@ import {
   TX_TYPES, STATES, STAGES
 } from "./partnerDb.js";
 import Contacts from "./PartnerContacts.jsx";
+import EmailAssistant from "./PartnerEmailAssistant.jsx";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
@@ -111,6 +112,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
           {navItem("deadlinesetup", "Deadline setup", "◷")}
           {navItem("feesetup", "Quote fees", "◇")}
           {navItem("doctemplates", "Doc templates", "❏")}
+          {navItem("emailassistant", "Email assistant", "✉")}
           <div style={{ fontSize: 10, letterSpacing: ".09em", textTransform: "uppercase", color: "#6f93bb", padding: "16px 12px 6px", fontWeight: 600 }}>Coming soon</div>
           {["✉ Smart Inbox", "✶ AI contract import"].map((t) => (
             <div key={t} style={{ padding: "9px 12px", fontSize: 13.5, color: "#5d7da6" }}>{t}</div>
@@ -152,7 +154,9 @@ export default function Workspace({ ctx, email, onSignOut }) {
                         ? <FeeSetup firmId={firm.id} />
                         : page === "doctemplates"
                           ? <DocTemplates firmId={firm.id} />
-                          : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
+                          : page === "emailassistant"
+                            ? <EmailAssistant firmId={firm.id} />
+                            : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
         </main>
       </div>
 
