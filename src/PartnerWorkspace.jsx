@@ -188,7 +188,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
                 : page === "mytasks"
                   ? <MyTasks onOpen={(id) => { setPage("matters"); setSelectedId(id); }} />
                   : page === "calendar"
-                  ? <Calendar onOpen={(id) => setSelectedId(id)} />
+                  ? <Calendar onOpen={(id) => setSelectedId(id)} matters={matters} />
                   : page === "quotes"
                     ? <QuotesCalculator firm={firm} matters={matters} onEditFees={() => go("feesetup")} onSaved={load} />
                     : page === "deadlinesetup"
@@ -1741,7 +1741,7 @@ function GenerateDocModal({ matter, firm, onClose, onSaved }) {
 }
 
 /* ---------------- Calendar / agenda (Phase 3.1b) ---------------- */
-function Calendar({ onOpen }) {
+function Calendar({ onOpen, matters = [] }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("agenda"); // agenda | month
@@ -1751,6 +1751,12 @@ function Calendar({ onOpen }) {
 
   const load = async () => { setLoading(true); try { setItems(await listFirmDeadlines()); } catch (e) { console.error(e); } setLoading(false); };
   useEffect(() => { load(); }, []);
+
+  const closingItems = useMemo(() => (matters || []).filter((m) => m.closing_date && !m.archived).map((m) => ({
+    id: "closing-" + m.id, name: "Closing", due_date: m.closing_date, done: false, kind: "closing",
+    matter: { id: m.id, file_number: m.file_number, property_address: m.property_address }
+  })), [matters]);
+  const allItems = useMemo(() => [...items, ...closingItems], [items, closingItems]);
 
   const toggle = async (d) => {
     const done = !d.done;
@@ -1764,12 +1770,15 @@ function Calendar({ onOpen }) {
   const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const matterLabel = (m) => m ? ([m.file_number, m.property_address].filter(Boolean).join(" · ") || "(matter)") : "(matter)";
 
-  const visible = items.filter((d) => (showDone || !d.done) && d.due_date);
+  const visible = allItems.filter((d) => (showDone || !d.done) && d.due_date);
   const overdue = [], soon = [], later = [];
   const in7 = new Date(today); in7.setDate(in7.getDate() + 7);
   for (const d of visible) {
     const due = parse(d.due_date);
-    if (!d.done && due < today) overdue.push(d);
+    if (d.kind === "closing") {
+      if (due < today) continue;
+      if (due <= in7) soon.push(d); else later.push(d);
+    } else if (!d.done && due < today) overdue.push(d);
     else if (due <= in7) soon.push(d);
     else later.push(d);
   }
@@ -1777,13 +1786,16 @@ function Calendar({ onOpen }) {
   const navBtn = { width: 34, height: 34, borderRadius: 8, border: `1px solid ${LINE}`, background: "#fff", cursor: "pointer", fontSize: 17, color: NV, lineHeight: 1 };
   const Row = ({ d }) => {
     const due = parse(d.due_date);
-    const od = !d.done && due < today;
+    const isClosing = d.kind === "closing";
+    const od = !isClosing && !d.done && due < today;
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px", borderTop: "1px solid #eef1f6" }}>
-        <input type="checkbox" checked={!!d.done} onChange={() => toggle(d)} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
+        {isClosing
+          ? <span title="Closing" style={{ width: 16, height: 16, borderRadius: 4, background: "#15803d", flexShrink: 0 }} />
+          : <input type="checkbox" checked={!!d.done} onChange={() => toggle(d)} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />}
         <div style={{ width: 96, flexShrink: 0, fontSize: 12, fontWeight: 600, color: od ? "#dc2626" : NV }}>{fmt(d.due_date)}</div>
         <div onClick={() => d.matter && onOpen(d.matter.id)} style={{ minWidth: 0, flex: 1, cursor: d.matter ? "pointer" : "default" }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: d.done ? "#9ca3af" : "#0f172a", textDecoration: d.done ? "line-through" : "none" }}>{d.name}</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: d.done ? "#9ca3af" : "#0f172a", textDecoration: d.done ? "line-through" : "none" }}>{d.name}{isClosing && <span style={{ ...tag("#dcfce7", "#15803d"), marginLeft: 6 }}>closing</span>}</div>
           <div style={{ fontSize: 11.5, color: MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{matterLabel(d.matter)}</div>
         </div>
         {od && <span style={tag("#fef2f2", "#dc2626")}>overdue</span>}
@@ -1806,7 +1818,7 @@ function Calendar({ onOpen }) {
     for (let i = 0; i < 42; i++) { const d = new Date(gridStart); d.setDate(gridStart.getDate() + i); cells.push(d); }
     return cells;
   }, [cursor]);
-  const byDay = useMemo(() => { const m = {}; for (const d of items) { if ((showDone || !d.done) && d.due_date) (m[d.due_date] = m[d.due_date] || []).push(d); } return m; }, [items, showDone]);
+  const byDay = useMemo(() => { const m = {}; for (const d of allItems) { if ((showDone || !d.done) && d.due_date) (m[d.due_date] = m[d.due_date] || []).push(d); } return m; }, [allItems, showDone]);
   const monthName = cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
   return (
@@ -1815,7 +1827,7 @@ function Calendar({ onOpen }) {
         <div>
           <div style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: BL, fontWeight: 600 }}>Your practice</div>
           <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Calendar</div>
-          <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Every deadline across your matters, in one place.</div>
+          <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Every deadline and closing across your matters, in one place.</div>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <label style={{ fontSize: 12, color: MUTED, display: "flex", alignItems: "center", gap: 5, cursor: "pointer" }}><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show completed</label>
@@ -1826,7 +1838,7 @@ function Calendar({ onOpen }) {
       {loading ? <div style={{ color: "#9ca3af", fontSize: 13, padding: 20 }}>Loading…</div>
         : view === "agenda"
           ? (visible.length === 0
-            ? <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: "40px 18px", textAlign: "center", color: "#9ca3af", fontSize: 13 }}>No deadlines yet. Add them on a matter, or set up your firm template in Deadline setup.</div>
+            ? <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: "40px 18px", textAlign: "center", color: "#9ca3af", fontSize: 13 }}>Nothing scheduled yet. Add deadlines on a matter (or set up your firm template), and set closing dates to see them here.</div>
             : <>
               <Group label="Overdue" list={overdue} color="#dc2626" />
               <Group label="Next 7 days" list={soon} color={NV} />
@@ -1848,7 +1860,7 @@ function Calendar({ onOpen }) {
                 return (
                   <div key={i} onClick={() => dayItems.length && setSelDay(selDay === key ? null : key)} style={{ minHeight: 66, border: `1px solid ${selDay === key ? BL : "#eef1f6"}`, borderRadius: 8, padding: 5, background: inMonth ? "#fff" : "#fafafa", cursor: dayItems.length ? "pointer" : "default", opacity: inMonth ? 1 : 0.55 }}>
                     <div style={{ fontSize: 11, fontWeight: isToday ? 700 : 500, color: isToday ? BL : "#334155", textAlign: "right" }}>{d.getDate()}</div>
-                    {dayItems.slice(0, 3).map((x) => { const xo = !x.done && parse(x.due_date) < today; return <div key={x.id} style={{ fontSize: 9.5, marginTop: 2, padding: "1px 4px", borderRadius: 3, background: x.done ? "#f1f5f9" : xo ? "#fef2f2" : "#e8f3ff", color: x.done ? "#94a3b8" : xo ? "#dc2626" : "#0f6fd1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.name}</div>; })}
+                    {dayItems.slice(0, 3).map((x) => { const isC = x.kind === "closing"; const xo = !isC && !x.done && parse(x.due_date) < today; return <div key={x.id} style={{ fontSize: 9.5, marginTop: 2, padding: "1px 4px", borderRadius: 3, background: isC ? "#dcfce7" : x.done ? "#f1f5f9" : xo ? "#fef2f2" : "#e8f3ff", color: isC ? "#15803d" : x.done ? "#94a3b8" : xo ? "#dc2626" : "#0f6fd1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{isC ? (x.matter && (x.matter.file_number || "Closing")) : x.name}</div>; })}
                     {dayItems.length > 3 && <div style={{ fontSize: 9, color: MUTED, marginTop: 1 }}>+{dayItems.length - 3} more</div>}
                   </div>
                 );
