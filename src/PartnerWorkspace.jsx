@@ -292,6 +292,24 @@ function Dashboard({ firm, org, accent, initials, openCount, lakelandCount, tota
 
 /* ---------------- Matters list ---------------- */
 function MattersList({ loading, matters, total, unreads = {}, onOpen, onNew, query, showArchived, onToggleArchived, archivedCount = 0 }) {
+  const [view, setView] = useState("all");
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = (d) => { try { return Math.round((new Date(d + "T00:00:00").getTime() - today.getTime()) / 86400000); } catch (e) { return null; } };
+  const VIEWS = [
+    ["all", "All matters"], ["purchase", "Purchases"], ["sale", "Sales"], ["refi", "Refinances"],
+    ["lakeland", "With Lakeland"], ["closing_week", "Closing ≤ 7 days"], ["closing_month", "Closing ≤ 30 days"], ["open", "Open (not closed)"]
+  ];
+  const viewed = useMemo(() => {
+    let l = matters;
+    if (view === "purchase") l = l.filter((m) => m.transaction_type === "Purchase");
+    else if (view === "sale") l = l.filter((m) => m.transaction_type === "Sale");
+    else if (view === "refi") l = l.filter((m) => m.transaction_type === "Refinance");
+    else if (view === "lakeland") l = l.filter((m) => m.title_provider === "lakeland");
+    else if (view === "closing_week") l = l.filter((m) => { const n = m.closing_date && days(m.closing_date); return n !== null && n >= 0 && n <= 7; });
+    else if (view === "closing_month") l = l.filter((m) => { const n = m.closing_date && days(m.closing_date); return n !== null && n >= 0 && n <= 30; });
+    else if (view === "open") l = l.filter((m) => (m.stage || 0) < STAGES.length - 1);
+    return l;
+  }, [matters, view]);
   return (
     <div>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 18 }}>
@@ -305,12 +323,19 @@ function MattersList({ loading, matters, total, unreads = {}, onOpen, onNew, que
           {!showArchived && <button onClick={onNew} style={{ padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ New matter</button>}
         </div>
       </div>
+      {!showArchived && (
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 12 }}>
+          {VIEWS.map(([v, label]) => (
+            <button key={v} onClick={() => setView(v)} style={{ padding: "6px 12px", borderRadius: 999, border: `1px solid ${view === v ? BL : LINE}`, background: view === v ? BL : "#fff", color: view === v ? "#fff" : NV, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>{label}</button>
+          ))}
+        </div>
+      )}
       <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14 }}>
         {loading
           ? <div style={{ padding: "26px 18px", color: "#9ca3af", fontSize: 13 }}>Loading…</div>
-          : matters.length === 0
-            ? <div style={{ padding: "30px 18px", color: "#9ca3af", fontSize: 13, textAlign: "center" }}>{showArchived ? "No archived files." : (query ? "No matters match your search." : "No matters yet — open your first file with “New matter.”")}</div>
-            : matters.map((m) => <MatterRow key={m.id} m={m} unread={unreads[m.id]} onOpen={onOpen} />)}
+          : viewed.length === 0
+            ? <div style={{ padding: "30px 18px", color: "#9ca3af", fontSize: 13, textAlign: "center" }}>{showArchived ? "No archived files." : (matters.length === 0 ? (query ? "No matters match your search." : "No matters yet — open your first file with “New matter.”") : "No matters in this view.")}</div>
+            : viewed.map((m) => <MatterRow key={m.id} m={m} unread={unreads[m.id]} onOpen={onOpen} />)}
       </div>
     </div>
   );
