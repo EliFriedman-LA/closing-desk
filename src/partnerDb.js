@@ -446,27 +446,60 @@ export async function saveEmailAssistantProfile(firmId, answers, generatedPrompt
   if (error) throw error;
 }
 
-/* ---------------- Notifications (in-app) ---------------- */
+/* ---------------- Notifications (in-app, per-user read state) ---------------- */
 export async function listNotifications(limit = 30) {
   const { data, error } = await supabase.from("notifications")
     .select("*").order("created_at", { ascending: false }).limit(limit);
   if (error) throw error;
   return data || [];
 }
-export async function notificationsUnreadCount() {
-  const { count, error } = await supabase.from("notifications")
-    .select("id", { count: "exact", head: true }).is("read_at", null);
-  if (error) return 0;
-  return count || 0;
+export async function myReadNotificationIds() {
+  const { data, error } = await supabase.from("notification_reads").select("notification_id");
+  if (error) return new Set();
+  return new Set((data || []).map((r) => r.notification_id));
+}
+async function _currentUid() {
+  try { const { data } = await supabase.auth.getUser(); return (data && data.user && data.user.id) || null; } catch (e) { return null; }
 }
 export async function markNotificationRead(id) {
-  const { error } = await supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("id", id);
+  const u = await _currentUid(); if (!u) return;
+  await supabase.from("notification_reads").upsert({ notification_id: id, user_id: u }, { onConflict: "notification_id,user_id", ignoreDuplicates: true });
+}
+export async function markNotificationsRead(ids) {
+  if (!ids || !ids.length) return;
+  const u = await _currentUid(); if (!u) return;
+  await supabase.from("notification_reads").upsert(ids.map((id) => ({ notification_id: id, user_id: u })), { onConflict: "notification_id,user_id", ignoreDuplicates: true });
+}
+
+/* ---------------- Team & roles (Phase T1) ---------------- */
+export async function teamMembers() {
+  const { data, error } = await supabase.rpc("team_members");
+  if (error) throw error;
+  return data || [];
+}
+export async function teamPendingInvites() {
+  const { data, error } = await supabase.rpc("team_pending_invites");
+  if (error) throw error;
+  return data || [];
+}
+export async function teamInvite(email, role) {
+  const { data, error } = await supabase.rpc("team_invite", { p_email: email, p_role: role });
+  if (error) throw error;
+  return (data && data[0]) || null;
+}
+export async function teamSetRole(userId, role) {
+  const { error } = await supabase.rpc("team_set_role", { p_user_id: userId, p_role: role });
   if (error) throw error;
 }
-export async function markAllNotificationsRead() {
-  const { error } = await supabase.from("notifications").update({ read_at: new Date().toISOString() }).is("read_at", null);
+export async function teamRemove(userId) {
+  const { error } = await supabase.rpc("team_remove", { p_user_id: userId });
   if (error) throw error;
 }
+export async function teamRevokeInvite(id) {
+  const { error } = await supabase.rpc("team_revoke_invite", { p_invite_id: id });
+  if (error) throw error;
+}
+
 
 /* ---------------- Open deadlines (for dashboard risk panel) ---------------- */
 export async function listOpenDeadlines() {

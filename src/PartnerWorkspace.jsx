@@ -11,7 +11,8 @@ import {
 } from "./partnerDb.js";
 import Contacts from "./PartnerContacts.jsx";
 import EmailAssistant from "./PartnerEmailAssistant.jsx";
-import { listNotifications, markNotificationRead, markAllNotificationsRead, listOpenDeadlines } from "./partnerDb.js";
+import { listNotifications, markNotificationRead, markNotificationsRead, myReadNotificationIds, listOpenDeadlines } from "./partnerDb.js";
+import { teamMembers, teamPendingInvites, teamInvite, teamSetRole, teamRemove, teamRevokeInvite } from "./partnerDb.js";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
@@ -22,6 +23,7 @@ const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0", FIRM_
 
 export default function Workspace({ ctx, email, onSignOut }) {
   const firm = ctx.firm || {};
+  const myRole = ctx.role || "attorney";
   const org = ctx.org || {};
   const accent = firm.brand_color || FIRM_DEFAULT;
   const initials = (firm.name || "F").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
@@ -35,6 +37,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
   const [navOpen, setNavOpen] = useState(false);
   const [unreads, setUnreads] = useState({});
   const [notifs, setNotifs] = useState([]);
+  const [readIds, setReadIds] = useState(new Set());
 
   const load = async () => {
     setLoading(true);
@@ -42,7 +45,12 @@ export default function Workspace({ ctx, email, onSignOut }) {
     setLoading(false);
   };
   const loadUnreads = async () => { try { setUnreads(await listUnreads()); } catch (e) { /* ignore */ } };
-  const loadNotifs = async () => { try { setNotifs(await listNotifications()); } catch (e) { /* ignore */ } };
+  const loadNotifs = async () => {
+    try {
+      const [n, r] = await Promise.all([listNotifications(), myReadNotificationIds()]);
+      setNotifs(n); setReadIds(r);
+    } catch (e) { /* ignore */ }
+  };
   useEffect(() => {
     load(); loadUnreads(); loadNotifs();
     const id = setInterval(() => { loadUnreads(); loadNotifs(); }, 25000);
@@ -50,11 +58,17 @@ export default function Workspace({ ctx, email, onSignOut }) {
   }, []);
 
   const openNotif = async (n) => {
-    try { if (!n.read_at) { await markNotificationRead(n.id); setNotifs((p) => p.map((x) => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)); } } catch (e) { /* ignore */ }
+    if (!readIds.has(n.id)) {
+      try { await markNotificationRead(n.id); } catch (e) { /* ignore */ }
+      setReadIds((prev) => { const s = new Set(prev); s.add(n.id); return s; });
+    }
     if (n.matter_id) { setPage("matters"); setSelectedId(n.matter_id); }
   };
   const markAllNotifs = async () => {
-    try { await markAllNotificationsRead(); const now = new Date().toISOString(); setNotifs((p) => p.map((x) => x.read_at ? x : { ...x, read_at: now })); } catch (e) { /* ignore */ }
+    const unread = notifs.filter((n) => !readIds.has(n.id)).map((n) => n.id);
+    if (!unread.length) return;
+    try { await markNotificationsRead(unread); } catch (e) { /* ignore */ }
+    setReadIds((prev) => { const s = new Set(prev); unread.forEach((id) => s.add(id)); return s; });
   };
 
   const selected = matters.find((m) => m.id === selectedId) || null;
@@ -124,6 +138,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
           {navItem("feesetup", "Quote fees", "◇")}
           {navItem("doctemplates", "Doc templates", "❏")}
           {navItem("emailassistant", "Email assistant", "✉")}
+          {navItem("team", "Team", "◑")}
           <div style={{ fontSize: 10, letterSpacing: ".09em", textTransform: "uppercase", color: "#6f93bb", padding: "16px 12px 6px", fontWeight: 600 }}>Coming soon</div>
           {["✉ Smart Inbox", "✶ AI contract import"].map((t) => (
             <div key={t} style={{ padding: "9px 12px", fontSize: 13.5, color: "#5d7da6" }}>{t}</div>
@@ -146,7 +161,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search matters…" style={{ flex: 1, maxWidth: 380, padding: "9px 12px", border: `1px solid ${LINE}`, borderRadius: 9, background: "#f8fafc", fontSize: 13.5 }} />
           )}
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
-            <NotificationBell items={notifs} onOpenItem={openNotif} onMarkAll={markAllNotifs} />
+            <NotificationBell items={notifs} readIds={readIds} onOpenItem={openNotif} onMarkAll={markAllNotifs} />
             {page !== "contacts" && <button onClick={() => setShowNew(true)} style={{ padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ New matter</button>}
           </div>
         </header>
@@ -170,7 +185,9 @@ export default function Workspace({ ctx, email, onSignOut }) {
                           ? <DocTemplates firmId={firm.id} />
                           : page === "emailassistant"
                             ? <EmailAssistant firmId={firm.id} />
-                            : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
+                            : page === "team"
+                              ? <Team firm={firm} myRole={myRole} myEmail={email} />
+                              : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} />}
         </main>
       </div>
 
@@ -1657,10 +1674,117 @@ function PlaceOrderModal({ matter, onClose, onPlaced }) {
   );
 }
 
+/* ---------------- Team & roles ---------------- */
+const ROLE_OPTS = ["attorney", "paralegal", "admin"];
+const roleStyle = { attorney: { bg: "#e8f3ff", c: "#0f6fd1" }, admin: { bg: "#f5f3ff", c: "#6d28d9" }, paralegal: { bg: "#f1f5f9", c: "#475569" } };
+
+function Team({ firm, myRole, myEmail }) {
+  const manager = myRole === "attorney" || myRole === "admin";
+  const [members, setMembers] = useState([]);
+  const [invites, setInvites] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("paralegal");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [copied, setCopied] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      setMembers(await teamMembers());
+      if (manager) setInvites(await teamPendingInvites());
+    } catch (e) { /* ignore */ }
+    setLoading(false);
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const linkFor = (token) => `${window.location.origin}/accept?token=${encodeURIComponent(token)}`;
+  const copy = (text, id) => { try { navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(""), 1600); } catch (e) { /* ignore */ } };
+
+  const invite = async () => {
+    setErr("");
+    const e = email.trim();
+    if (!e) { setErr("Enter an email."); return; }
+    setBusy(true);
+    try { await teamInvite(e, role); setEmail(""); setRole("paralegal"); await load(); }
+    catch (ex) { setErr(ex.message || String(ex)); }
+    setBusy(false);
+  };
+  const changeRole = async (m, r) => { try { await teamSetRole(m.user_id, r); await load(); } catch (e) { alert(e.message || String(e)); } };
+  const remove = async (m) => { if (!window.confirm(`Remove ${m.email || m.name} from the team?`)) return; try { await teamRemove(m.user_id); await load(); } catch (e) { alert(e.message || String(e)); } };
+  const revoke = async (inv) => { if (!window.confirm(`Revoke the invite to ${inv.email}?`)) return; try { await teamRevokeInvite(inv.id); await load(); } catch (e) { alert(e.message || String(e)); } };
+
+  const Badge = ({ r }) => { const s = roleStyle[r] || roleStyle.paralegal; return <span style={{ ...tag(s.bg, s.c), textTransform: "capitalize" }}>{r}</span>; };
+
+  return (
+    <div style={{ maxWidth: 760 }}>
+      <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Team</div>
+      <div style={{ color: MUTED, fontSize: 13.5, margin: "4px 0 18px" }}>Everyone in your firm's workspace. {manager ? "Invite teammates and set what they can do." : "Ask an attorney or admin to manage members."}</div>
+
+      {manager && (
+        <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginBottom: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: NV, marginBottom: 10 }}>Invite a teammate</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="their work email" type="email" style={{ flex: "2 1 220px", padding: "9px 11px", border: `1px solid ${LINE}`, borderRadius: 9, fontSize: 13.5, background: "#f8fafc" }} />
+            <select value={role} onChange={(e) => setRole(e.target.value)} style={{ flex: "1 1 130px", padding: "9px 11px", border: `1px solid ${LINE}`, borderRadius: 9, fontSize: 13.5, background: "#fff", textTransform: "capitalize" }}>
+              {ROLE_OPTS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+            <button onClick={invite} disabled={busy} style={{ padding: "9px 18px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: busy ? "default" : "pointer" }}>{busy ? "Working…" : "Send invite"}</button>
+          </div>
+          {err && <div style={{ color: "#dc2626", fontSize: 12.5, marginTop: 8 }}>{err}</div>}
+          <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>Creates an invite link. They sign in with that exact email to join your firm.</div>
+        </div>
+      )}
+
+      <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden", marginBottom: manager ? 16 : 0 }}>
+        <div style={{ padding: "13px 16px", borderBottom: `1px solid ${LINE}`, fontWeight: 700, fontSize: 14, color: NV }}>Members</div>
+        {loading ? <div style={{ padding: 18, color: "#9ca3af", fontSize: 13 }}>Loading…</div>
+          : members.length === 0 ? <div style={{ padding: 18, color: MUTED, fontSize: 13 }}>No members yet.</div>
+            : members.map((m) => {
+              const isMe = (m.email || "").toLowerCase() === (myEmail || "").toLowerCase();
+              return (
+                <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderTop: "1px solid #eef1f6" }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 8, background: "#eef4fb", color: NV, display: "grid", placeItems: "center", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>{((m.name || m.email || "?")[0] || "?").toUpperCase()}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: NV }}>{m.name || m.email}{isMe && <span style={{ fontSize: 11, color: MUTED, fontWeight: 500 }}> · you</span>}</div>
+                    {m.name && <div style={{ fontSize: 12, color: MUTED }}>{m.email}</div>}
+                  </div>
+                  {manager && !isMe
+                    ? <select value={m.role} onChange={(e) => changeRole(m, e.target.value)} style={{ padding: "6px 9px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12.5, background: "#fff", textTransform: "capitalize" }}>
+                        {ROLE_OPTS.map((r) => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    : <Badge r={m.role} />}
+                  {manager && !isMe && <button onClick={() => remove(m)} style={{ background: "none", border: "none", color: "#b91c1c", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Remove</button>}
+                </div>
+              );
+            })}
+      </div>
+
+      {manager && invites.length > 0 && (
+        <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden" }}>
+          <div style={{ padding: "13px 16px", borderBottom: `1px solid ${LINE}`, fontWeight: 700, fontSize: 14, color: NV }}>Pending invites</div>
+          {invites.map((inv) => (
+            <div key={inv.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", borderTop: "1px solid #eef1f6", flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: NV }}>{inv.email}</div>
+                <div style={{ fontSize: 11.5, color: MUTED, textTransform: "capitalize" }}>{inv.role} · invited</div>
+              </div>
+              <button onClick={() => copy(linkFor(inv.token), inv.id)} style={{ padding: "6px 12px", background: "#fff", color: BL, border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{copied === inv.id ? "Copied ✓" : "Copy link"}</button>
+              <button onClick={() => revoke(inv)} style={{ background: "none", border: "none", color: "#b91c1c", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Revoke</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------------- Notification bell ---------------- */
-function NotificationBell({ items, onOpenItem, onMarkAll }) {
+function NotificationBell({ items, readIds, onOpenItem, onMarkAll }) {
   const [open, setOpen] = useState(false);
-  const unread = items.filter((n) => !n.read_at).length;
+  const isRead = (n) => readIds && readIds.has(n.id);
+  const unread = items.filter((n) => !isRead(n)).length;
   const fmt = (s) => {
     try {
       const d = new Date(s), diff = (Date.now() - d.getTime()) / 1000;
@@ -1687,8 +1811,8 @@ function NotificationBell({ items, onOpenItem, onMarkAll }) {
             {items.length === 0
               ? <div style={{ padding: "26px 16px", textAlign: "center", color: MUTED, fontSize: 12.5 }}>You're all caught up.</div>
               : items.map((n) => (
-                <div key={n.id} onClick={() => { onOpenItem(n); setOpen(false); }} style={{ display: "flex", gap: 10, padding: "11px 14px", borderTop: "1px solid #eef1f6", cursor: "pointer", background: n.read_at ? "#fff" : "#f5faff" }}>
-                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: n.read_at ? "transparent" : BL, marginTop: 5, flexShrink: 0 }} />
+                <div key={n.id} onClick={() => { onOpenItem(n); setOpen(false); }} style={{ display: "flex", gap: 10, padding: "11px 14px", borderTop: "1px solid #eef1f6", cursor: "pointer", background: isRead(n) ? "#fff" : "#f5faff" }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: isRead(n) ? "transparent" : BL, marginTop: 5, flexShrink: 0 }} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: NV }}>{n.title || "Update"}</div>
                     {n.detail && <div style={{ fontSize: 12, color: MUTED, marginTop: 1 }}>{n.detail}</div>}
