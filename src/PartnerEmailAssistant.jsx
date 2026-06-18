@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import PizZip from "pizzip";
 import { getEmailAssistantProfile, saveEmailAssistantProfile } from "./partnerDb.js";
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0";
@@ -54,6 +55,28 @@ function buildPrompt(a) {
   return L.join("\n");
 }
 
+function buildSkillBlob(promptText) {
+  const md = "---\n"
+    + "name: inbox-triage\n"
+    + "description: Triage and prioritize the user's Outlook inbox. Use whenever the user asks to triage, sort, prioritize, clean up, or review their email or inbox, or asks what needs their attention.\n"
+    + "---\n\n"
+    + "# Inbox triage\n\n"
+    + "When the user asks you to triage, sort, or review their inbox, follow the instructions below exactly.\n\n"
+    + promptText + "\n";
+  const zip = new PizZip();
+  zip.file("inbox-triage/SKILL.md", md);
+  return zip.generate({ type: "blob" });
+}
+function triggerDownload(blob, filename) {
+  try {
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement("a");
+    el.href = url; el.download = filename;
+    document.body.appendChild(el); el.click(); document.body.removeChild(el);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch (e) { alert("Download failed: " + (e.message || e)); }
+}
+
 const card = { background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: "18px 20px", marginBottom: 16 };
 const h = { fontSize: 14.5, fontWeight: 700, color: NV, marginBottom: 3 };
 const sub = { fontSize: 12.5, color: MUTED, marginBottom: 12 };
@@ -100,6 +123,7 @@ export default function EmailAssistant({ firmId }) {
     try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { /* ignore */ }
   };
   const copy = () => { try { navigator.clipboard.writeText(prompt); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e) { /* ignore */ } };
+  const downloadSkill = () => { try { triggerDownload(buildSkillBlob(prompt), "inbox-triage-skill.zip"); } catch (e) { alert("Could not build skill: " + (e.message || e)); } };
 
   if (loading) return <div style={{ color: "#9ca3af", fontSize: 13 }}>Loading…</div>;
 
@@ -107,31 +131,47 @@ export default function EmailAssistant({ firmId }) {
     return (
       <div style={{ maxWidth: 760 }}>
         <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Your email assistant is ready</div>
-        <div style={{ color: MUTED, fontSize: 13.5, margin: "4px 0 16px" }}>Paste this prompt into Claude inside Outlook. Steps are below.</div>
+        <div style={{ color: MUTED, fontSize: 13.5, margin: "4px 0 16px" }}>Set this up once in Claude inside Outlook. Recommended way is below, no daily copy-paste.</div>
 
         <div style={{ ...card, padding: 0, overflow: "hidden" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 16px", borderBottom: `1px solid ${LINE}` }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: NV }}>Your prompt</span>
-            <button onClick={copy} style={{ padding: "7px 15px", background: BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy prompt"}</button>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 16px", borderBottom: `1px solid ${LINE}`, gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: NV }}>Your triage instructions</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={downloadSkill} style={{ padding: "7px 15px", background: BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>↓ Download skill</button>
+              <button onClick={copy} style={{ padding: "7px 15px", background: "#fff", color: NV, border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy prompt"}</button>
+            </div>
           </div>
-          <pre style={{ margin: 0, padding: "14px 16px", fontSize: 12.5, lineHeight: 1.6, color: "#1f2937", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "ui-monospace, Menlo, monospace", background: "#fbfdff", maxHeight: 360, overflowY: "auto" }}>{prompt}</pre>
+          <pre style={{ margin: 0, padding: "14px 16px", fontSize: 12.5, lineHeight: 1.6, color: "#1f2937", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "ui-monospace, Menlo, monospace", background: "#fbfdff", maxHeight: 320, overflowY: "auto" }}>{prompt}</pre>
         </div>
 
         <div style={card}>
-          <div style={h}>Set it up in Outlook — one time</div>
+          <div style={h}>First, add Claude to Outlook — one time</div>
           <ol style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 13.5, lineHeight: 1.7, color: "#334155" }}>
             <li>Sign in to a paid Claude plan (Pro or higher) using your work Microsoft 365 account.</li>
             <li>Install the add-in: in <a href="https://marketplace.microsoft.com/en-us/product/office/wa200010724" target="_blank" rel="noreferrer" style={{ color: BL }}>Microsoft AppSource</a> search <b>"Claude by Anthropic for Outlook"</b> and add it. If your firm controls add-ins centrally, your IT admin approves it once.</li>
-            <li>In Outlook, open any email, click the <b>Claude</b> button in the ribbon, and sign in with your Claude account.</li>
-            <li>Pin the panel so it stays open as you move between messages.</li>
+            <li>In Outlook, open any email, click the <b>Claude</b> button in the ribbon, and sign in. Pin the panel so it stays open.</li>
           </ol>
-          <div style={{ ...h, marginTop: 16 }}>Use it each day</div>
+        </div>
+
+        <div style={{ ...card, border: `1.5px solid ${BL}`, background: "#f5faff" }}>
+          <div style={{ ...h, color: BL }}>Recommended: make it automatic (no daily pasting)</div>
+          <div style={sub}>Upload your instructions once as a skill. After that Claude uses it on its own — you just ask it to triage.</div>
+          <ol style={{ margin: "4px 0 0", paddingLeft: 20, fontSize: 13.5, lineHeight: 1.7, color: "#334155" }}>
+            <li>Click <b>↓ Download skill</b> above to save the file.</li>
+            <li>In Claude, go to <b>Customize → Skills</b>, click <b>+ Create skill</b>, and upload that file.</li>
+            <li>Make sure the new <b>inbox-triage</b> skill is toggled on.</li>
+            <li>In Outlook, open the Claude panel and type <b>"triage my inbox."</b> Claude applies your skill automatically — every session, nothing to paste.</li>
+          </ol>
+        </div>
+
+        <div style={card}>
+          <div style={h}>Or, the quick way (no upload)</div>
           <ol style={{ margin: "8px 0 0", paddingLeft: 20, fontSize: 13.5, lineHeight: 1.7, color: "#334155" }}>
             <li>Open the Claude panel in Outlook.</li>
-            <li>Paste your prompt (the Copy button above) as the first message.</li>
+            <li><b>Copy prompt</b> above and paste it as your first message.</li>
             <li>Type <b>"triage my inbox."</b></li>
           </ol>
-          <div style={{ fontSize: 12.5, color: MUTED, marginTop: 10, lineHeight: 1.6 }}>The panel starts a fresh conversation each time you open it, so paste the prompt at the start of each session. Your answers are saved here — come back anytime to adjust and regenerate.</div>
+          <div style={{ fontSize: 12.5, color: MUTED, marginTop: 10, lineHeight: 1.6 }}>The panel starts fresh each session, so this way you re-paste each time. Your answers are saved here — come back anytime to adjust and regenerate.</div>
         </div>
 
         <button onClick={() => setStep("form")} style={{ padding: "9px 16px", background: "#fff", color: NV, border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>← Edit my answers</button>
