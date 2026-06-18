@@ -14,7 +14,7 @@ import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, 
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
 import { DOC_TOKENS, TOKEN_LABELS, buildMergeData, generateDocs, downloadBlob } from "./partnerDocs.js";
-import { createClientLink, listClientLinks, revokeClientLink, setDocumentClientVisible, listClientMessages, sendClientMessageAsFirm, markClientMessagesRead } from "./partnerDb.js";
+import { createClientLink, listClientLinks, revokeClientLink, setDocumentClientVisible, listClientMessages, sendClientMessageAsFirm, markClientMessagesRead, extractContract } from "./partnerDb.js";
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0", FIRM_DEFAULT = "#0f5132";
 
@@ -1597,9 +1597,57 @@ function PlaceOrderModal({ matter, onClose, onPlaced }) {
 /* ---------------- New matter modal ---------------- */
 function NewMatterModal({ onClose, onCreate }) {
   const [provider, setProvider] = useState("lakeland");
-  const [f, setF] = useState({ file_number: "", property_address: "", town: "", state: "NJ", transaction_type: "Purchase", title_company_name: "" });
+  const [f, setF] = useState({ file_number: "", property_address: "", town: "", state: "NJ", transaction_type: "Purchase", title_company_name: "", buyer: "", seller: "", lender: "", contract_date: "", closing_date: "" });
   const [saving, setSaving] = useState(false);
   const u = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  const [importing, setImporting] = useState(false);
+  const [importErr, setImportErr] = useState("");
+  const [importedNote, setImportedNote] = useState("");
+  const [pasteMode, setPasteMode] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const fileRef = useRef(null);
+
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] || "");
+    r.onerror = () => reject(new Error("Couldn't read the file."));
+    r.readAsDataURL(file);
+  });
+  const applyExtract = (d) => {
+    setF((p) => ({
+      ...p,
+      property_address: d.property_address || p.property_address,
+      town: d.town || p.town,
+      state: d.state && STATES.includes(d.state) ? d.state : p.state,
+      transaction_type: d.transaction_type && TX_TYPES.includes(d.transaction_type) ? d.transaction_type : p.transaction_type,
+      buyer: d.buyer || p.buyer,
+      seller: d.seller || p.seller,
+      lender: d.lender || p.lender,
+      contract_date: d.contract_date || p.contract_date,
+      closing_date: d.closing_date || p.closing_date
+    }));
+    const filled = ["buyer", "seller", "lender", "property_address", "town", "state", "transaction_type", "contract_date", "closing_date"].filter((k) => d[k]).length;
+    setImportedNote(filled ? `Filled ${filled} field${filled > 1 ? "s" : ""} — review below before creating.` : "Nothing could be read from that — enter the fields manually.");
+  };
+  const onPdf = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (fileRef.current) fileRef.current.value = "";
+    if (!file) return;
+    if (!/\.pdf$/i.test(file.name)) { setImportErr("Please choose a PDF, or use Paste text."); return; }
+    setImporting(true); setImportErr(""); setImportedNote("");
+    try { applyExtract(await extractContract({ pdf: await fileToBase64(file), filename: file.name })); }
+    catch (err) { setImportErr(err.message || "Couldn't read that contract."); }
+    setImporting(false);
+  };
+  const onPasteExtract = async () => {
+    const t = pasteText.trim();
+    if (!t) return;
+    setImporting(true); setImportErr(""); setImportedNote("");
+    try { applyExtract(await extractContract({ text: t })); setPasteMode(false); setPasteText(""); }
+    catch (err) { setImportErr(err.message || "Couldn't read that text."); }
+    setImporting(false);
+  };
 
   const submit = async () => {
     setSaving(true);
@@ -1612,6 +1660,11 @@ function NewMatterModal({ onClose, onCreate }) {
         town: f.town.trim(),
         state: f.state,
         transaction_type: f.transaction_type,
+        buyer_name: f.buyer.trim() || null,
+        seller_name: f.seller.trim() || null,
+        lender_name: f.lender.trim() || null,
+        contract_date: f.contract_date || null,
+        closing_date: f.closing_date || null,
         stage: 0
       });
     } catch (e) {
@@ -1631,6 +1684,24 @@ function NewMatterModal({ onClose, onCreate }) {
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, color: "#9ca3af", cursor: "pointer" }}>×</button>
         </div>
         <div style={{ padding: 22 }}>
+          <div style={{ background: "#f0f7ff", border: "1px solid #cfe4fb", borderRadius: 12, padding: 14, marginBottom: 18 }}>
+            <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 2 }}>✶ Import from contract</div>
+            <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 10 }}>Upload the contract PDF or paste the order text — we'll fill the fields below for you to review.</div>
+            <input ref={fileRef} type="file" accept=".pdf" onChange={onPdf} style={{ display: "none" }} />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={() => fileRef.current && fileRef.current.click()} disabled={importing} style={{ padding: "8px 14px", background: importing ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: importing ? "default" : "pointer" }}>{importing ? "Reading…" : "⬆ Upload PDF"}</button>
+              <button onClick={() => { setPasteMode((v) => !v); setImportErr(""); }} disabled={importing} style={{ padding: "8px 14px", background: "#fff", color: NV, border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>{pasteMode ? "Cancel paste" : "Paste text"}</button>
+            </div>
+            {pasteMode && (
+              <div style={{ marginTop: 10 }}>
+                <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={4} placeholder="Paste the order email or contract text here…" style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${LINE}`, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontFamily: "inherit", outline: "none", resize: "vertical" }} />
+                <button onClick={onPasteExtract} disabled={importing || !pasteText.trim()} style={{ marginTop: 6, padding: "7px 14px", background: pasteText.trim() ? BL : "#cbd5e1", color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: pasteText.trim() ? "pointer" : "default" }}>{importing ? "Reading…" : "Extract"}</button>
+              </div>
+            )}
+            {importErr && <div style={{ fontSize: 11.5, color: "#b91c1c", marginTop: 8 }}>{importErr}</div>}
+            {importedNote && <div style={{ fontSize: 11.5, color: "#065f46", fontWeight: 600, marginTop: 8 }}>{importedNote}</div>}
+          </div>
+
           <div style={lbl}>Title handled by</div>
           <div style={{ display: "flex", gap: 8 }}>
             {[["lakeland", "◆ Lakeland"], ["other", "Other / none"]].map(([k, l]) => (
@@ -1670,6 +1741,28 @@ function NewMatterModal({ onClose, onCreate }) {
           <select style={inp} value={f.transaction_type} onChange={(e) => u("transaction_type", e.target.value)}>
             {TX_TYPES.map((t) => <option key={t}>{t}</option>)}
           </select>
+
+          <div style={{ borderTop: `1px solid ${LINE}`, margin: "18px 0 4px", paddingTop: 14, fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase", color: MUTED, fontWeight: 700 }}>Parties &amp; dates (optional)</div>
+
+          <label style={lbl}>Buyer / borrower</label>
+          <input style={inp} value={f.buyer} onChange={(e) => u("buyer", e.target.value)} placeholder="Full name(s)" />
+
+          <label style={lbl}>Seller</label>
+          <input style={inp} value={f.seller} onChange={(e) => u("seller", e.target.value)} placeholder="Full name(s)" />
+
+          <label style={lbl}>Lender</label>
+          <input style={inp} value={f.lender} onChange={(e) => u("lender", e.target.value)} placeholder="Lender name" />
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={lbl}>Contract date</label>
+              <input type="date" style={inp} value={f.contract_date} onChange={(e) => u("contract_date", e.target.value)} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={lbl}>Closing date</label>
+              <input type="date" style={inp} value={f.closing_date} onChange={(e) => u("closing_date", e.target.value)} />
+            </div>
+          </div>
 
           <button onClick={submit} disabled={saving} style={{ width: "100%", marginTop: 18, padding: "11px", background: saving ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 14, cursor: saving ? "default" : "pointer" }}>
             {saving ? "Creating…" : "Create matter"}

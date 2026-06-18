@@ -413,3 +413,17 @@ export async function markClientMessagesRead(matterId) {
     .eq("matter_id", matterId).eq("sender", "client").eq("read_by_firm", false);
   if (error) throw error;
 }
+
+/* ---------------- Contract import (Phase 5.1) ---------------- */
+// POST a contract PDF (base64) or pasted text to the extractor; returns the matter fields.
+export async function extractContract(payload) {
+  const r = await fetch("/api/extract-contract", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  let j = {};
+  try { j = await r.json(); } catch (e) { /* non-JSON */ }
+  if (!r.ok || !j.ok) throw new Error(j.error || `Extraction failed (${r.status})`);
+  return j.data;
+}
