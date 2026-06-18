@@ -27,3 +27,12 @@ export function getClientMessages(token) {
 export function sendClientMessage(token, body) {
   return post("/api/client-messages", { token, body });
 }
+
+// Three steps: get a signed URL, PUT the file straight to storage, then record it.
+export async function uploadClientFile(token, file) {
+  const ct = file.type || "application/octet-stream";
+  const sign = await post("/api/client-upload", { token, action: "sign", filename: file.name, size: file.size, content_type: ct });
+  const put = await fetch(sign.uploadUrl, { method: "PUT", headers: { "content-type": ct, "x-upsert": "true" }, body: file });
+  if (!put.ok) throw new Error(`Upload failed (${put.status})`);
+  return post("/api/client-upload", { token, action: "confirm", path: sign.path, filename: file.name, size: file.size, content_type: ct });
+}

@@ -475,7 +475,7 @@ function DocumentsPanel({ matter, reloadKey, onGenerate }) {
                 <div onClick={() => open(d)} style={{ fontSize: 13, fontWeight: 600, color: NV, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
                 <div style={{ fontSize: 11, color: MUTED }}>{[fmtSize(d.size), fmtDate(d.created_at)].filter(Boolean).join(" · ")}</div>
               </div>
-              <span style={d.side === "lakeland" ? tag("#e8f3ff", "#0f6fd1") : tag("#f1f5f9", "#475569")}>{d.side === "lakeland" ? "Lakeland" : "You"}</span>
+              <span style={d.uploaded_by_client ? tag("#fef3c7", "#92400e") : d.side === "lakeland" ? tag("#e8f3ff", "#0f6fd1") : tag("#f1f5f9", "#475569")}>{d.uploaded_by_client ? "Client" : d.side === "lakeland" ? "Lakeland" : "You"}</span>
               <button onClick={() => toggleShare(d)} title="Show in the client portal" style={{ padding: "5px 10px", background: d.client_visible ? "#ecfdf5" : "#fff", border: `1px solid ${d.client_visible ? "#a7f3d0" : LINE}`, color: d.client_visible ? "#065f46" : MUTED, borderRadius: 6, fontSize: 11.5, fontWeight: 600, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>{d.client_visible ? "Shared ✓" : "Share"}</button>
               <button onClick={() => open(d)} style={{ padding: "5px 10px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 6, fontSize: 11.5, fontWeight: 500, cursor: "pointer" }}>Open</button>
               {d.side === "firm" && <button onClick={() => remove(d)} title="Delete" style={{ padding: "5px 8px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 11.5, cursor: "pointer" }}>✕</button>}

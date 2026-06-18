@@ -2,8 +2,8 @@
 // Rendered (via partnerMain) when the path is /c/<token>. No login: the token
 // in the URL is validated server-side; this view only shows what the endpoint returns.
 
-import React, { useEffect, useState } from "react";
-import { getClientPortal, getClientDocUrl, getClientMessages, sendClientMessage } from "./clientDb.js";
+import React, { useEffect, useState, useRef } from "react";
+import { getClientPortal, getClientDocUrl, getClientMessages, sendClientMessage, uploadClientFile } from "./clientDb.js";
 
 const STAGES = ["Order", "Title search", "Commitment", "Clear to close", "Funded", "Recorded", "Policy"];
 
@@ -38,6 +38,21 @@ export default function ClientPortal() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const [dl, setDl] = useState(""); // id of doc currently being fetched
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+
+  const reload = () => getClientPortal(token).then((d) => setData(d)).catch(() => {});
+
+  const onUpload = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (fileRef.current) fileRef.current.value = "";
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) { alert("Files must be 25 MB or smaller."); return; }
+    setUploading(true);
+    try { await uploadClientFile(token, file); await reload(); }
+    catch (err) { alert(err.message || "Upload failed."); }
+    setUploading(false);
+  };
 
   const openDoc = async (docId) => {
     setDl(docId);
@@ -159,21 +174,31 @@ export default function ClientPortal() {
           </div>
         )}
 
-        {documents && documents.length > 0 && (
+        {((documents && documents.length > 0) || settings.allow_upload) && (
           <div style={card}>
-            <div style={sectionTitle}>Documents</div>
-            <div>
-              {documents.map((d, i) => (
-                <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 0", borderTop: i ? `1px solid #eef1f6` : "none" }}>
-                  <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, background: shade(accent, .86), color: accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>▤</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: NV, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
-                    <div style={{ fontSize: 11.5, color: MUTED }}>{fmtDate(d.created_at)}</div>
-                  </div>
-                  <button onClick={() => openDoc(d.id)} disabled={dl === d.id} style={{ padding: "7px 14px", background: accent, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: dl === d.id ? "default" : "pointer", flexShrink: 0, opacity: dl === d.id ? .7 : 1 }}>{dl === d.id ? "Opening…" : "View"}</button>
-                </div>
-              ))}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: documents && documents.length ? 4 : 0 }}>
+              <div style={sectionTitle}>Documents</div>
+              {settings.allow_upload && (
+                <>
+                  <input ref={fileRef} type="file" onChange={onUpload} style={{ display: "none" }} />
+                  <button onClick={() => fileRef.current && fileRef.current.click()} disabled={uploading} style={{ padding: "7px 14px", background: uploading ? "#9ca3af" : accent, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: uploading ? "default" : "pointer" }}>{uploading ? "Uploading…" : "⬆ Upload"}</button>
+                </>
+              )}
             </div>
+            {(!documents || documents.length === 0)
+              ? <div style={{ fontSize: 13, color: MUTED, padding: "10px 0 2px" }}>No documents yet.{settings.allow_upload ? " Use Upload to send a file to your closing team." : ""}</div>
+              : <div>
+                {documents.map((d, i) => (
+                  <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 0", borderTop: i ? `1px solid #eef1f6` : "none" }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, background: shade(accent, .86), color: accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>▤</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: NV, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                      <div style={{ fontSize: 11.5, color: MUTED }}>{fmtDate(d.created_at)}</div>
+                    </div>
+                    <button onClick={() => openDoc(d.id)} disabled={dl === d.id} style={{ padding: "7px 14px", background: accent, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: dl === d.id ? "default" : "pointer", flexShrink: 0, opacity: dl === d.id ? .7 : 1 }}>{dl === d.id ? "Opening…" : "View"}</button>
+                  </div>
+                ))}
+              </div>}
           </div>
         )}
 
