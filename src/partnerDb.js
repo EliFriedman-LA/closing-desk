@@ -509,3 +509,88 @@ export async function listOpenDeadlines() {
   if (error) throw error;
   return data || [];
 }
+
+/* ---------------- Tasks & checklists (Phase T2) ---------------- */
+export const TASK_ANCHORS = [["", "No date"], ["contract", "Contract date"], ["closing", "Closing date"]];
+export const TASK_TYPES = [["", "All types"], ["Purchase", "Purchase"], ["Sale", "Sale"], ["Refinance", "Refinance"], ["Commercial", "Commercial"], ["Other", "Other"]];
+
+export async function listTaskTemplates() {
+  const { data, error } = await supabase.from("firm_task_templates")
+    .select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+export async function createTaskTemplate(firmId, payload) {
+  const { data, error } = await supabase.from("firm_task_templates").insert({ firm_id: firmId, ...payload }).select().single();
+  if (error) throw error; return data;
+}
+export async function updateTaskTemplate(id, patch) {
+  const { data, error } = await supabase.from("firm_task_templates").update(patch).eq("id", id).select().single();
+  if (error) throw error; return data;
+}
+export async function deleteTaskTemplate(id) {
+  const { error } = await supabase.from("firm_task_templates").delete().eq("id", id);
+  if (error) throw error;
+}
+const DEFAULT_TASKS = [
+  { matter_type: null, label: "Open file & conflict check", anchor: "contract", offset_days: 0 },
+  { matter_type: null, label: "Order title", anchor: "contract", offset_days: 1 },
+  { matter_type: null, label: "Send attorney-review letter", anchor: "contract", offset_days: 1 },
+  { matter_type: "Purchase", label: "Order survey", anchor: "contract", offset_days: 5 },
+  { matter_type: null, label: "Request payoff / HOA estoppel", anchor: "contract", offset_days: 7 },
+  { matter_type: null, label: "Review title commitment", anchor: "closing", offset_days: -7 },
+  { matter_type: null, label: "Schedule closing", anchor: "closing", offset_days: -3 },
+  { matter_type: null, label: "Confirm wire & closing figures", anchor: "closing", offset_days: -2 }
+];
+export async function seedDefaultTaskTemplates(firmId) {
+  const rows = DEFAULT_TASKS.map((d, i) => ({ firm_id: firmId, ...d, sort_order: i }));
+  const { data, error } = await supabase.from("firm_task_templates").insert(rows).select();
+  if (error) throw error; return data || [];
+}
+
+export async function listMatterTasks(matterId) {
+  const { data, error } = await supabase.from("matter_tasks")
+    .select("*").eq("matter_id", matterId)
+    .order("done", { ascending: true }).order("due_date", { ascending: true, nullsFirst: false }).order("sort_order", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+export async function createMatterTask(firmId, matterId, payload) {
+  const { data, error } = await supabase.from("matter_tasks")
+    .insert({ firm_id: firmId, matter_id: matterId, source: "manual", ...payload }).select().single();
+  if (error) throw error; return data;
+}
+export async function updateMatterTask(id, patch) {
+  const { data, error } = await supabase.from("matter_tasks").update(patch).eq("id", id).select().single();
+  if (error) throw error; return data;
+}
+export async function deleteMatterTask(id) {
+  const { error } = await supabase.from("matter_tasks").delete().eq("id", id);
+  if (error) throw error;
+}
+export async function generateTasks(firmId, matter) {
+  const templates = await listTaskTemplates();
+  const existing = await listMatterTasks(matter.id);
+  const byTemplate = {}; existing.forEach((t) => { if (t.template_id) byTemplate[t.template_id] = t; });
+  const mt = matter.transaction_type || null;
+  let added = 0;
+  for (const t of templates) {
+    if (t.active === false) continue;
+    if (t.matter_type && mt && t.matter_type !== mt) continue;
+    if (byTemplate[t.id]) continue;
+    let due = null;
+    if (t.anchor) { const anchorDate = t.anchor === "closing" ? matter.closing_date : matter.contract_date; due = anchorDate ? addDays(anchorDate, t.offset_days) : null; }
+    await createMatterTask(firmId, matter.id, { label: t.label, due_date: due, source: "template", template_id: t.id, sort_order: t.sort_order });
+    added++;
+  }
+  return { added };
+}
+export async function myOpenTasks() {
+  const u = await _currentUid(); if (!u) return [];
+  const { data, error } = await supabase.from("matter_tasks")
+    .select("*, matter:matters(property_address, file_number, town)")
+    .eq("assignee_user_id", u).eq("done", false)
+    .order("due_date", { ascending: true, nullsFirst: false });
+  if (error) throw error;
+  return data || [];
+}

@@ -13,6 +13,7 @@ import Contacts from "./PartnerContacts.jsx";
 import EmailAssistant from "./PartnerEmailAssistant.jsx";
 import { listNotifications, markNotificationRead, markNotificationsRead, myReadNotificationIds, listOpenDeadlines } from "./partnerDb.js";
 import { teamMembers, teamPendingInvites, teamInvite, teamSetRole, teamRemove, teamRevokeInvite } from "./partnerDb.js";
+import { TASK_ANCHORS, TASK_TYPES, listTaskTemplates, createTaskTemplate, updateTaskTemplate, deleteTaskTemplate, seedDefaultTaskTemplates, listMatterTasks, createMatterTask, updateMatterTask, deleteMatterTask, generateTasks, myOpenTasks } from "./partnerDb.js";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
@@ -131,10 +132,12 @@ export default function Workspace({ ctx, email, onSignOut }) {
         <nav style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
           {navItem("dashboard", "Dashboard", "▦")}
           {navItem("matters", "Matters", "▤")}
+          {navItem("mytasks", "My tasks", "✓")}
           {navItem("calendar", "Calendar", "▥")}
           {navItem("quotes", "Quotes", "◈")}
           {navItem("contacts", "Contacts", "◍")}
           {navItem("deadlinesetup", "Deadline setup", "◷")}
+          {navItem("checklists", "Checklists", "▣")}
           {navItem("feesetup", "Quote fees", "◇")}
           {navItem("doctemplates", "Doc templates", "❏")}
           {navItem("emailassistant", "Email assistant", "✉")}
@@ -173,12 +176,16 @@ export default function Workspace({ ctx, email, onSignOut }) {
               ? <Dashboard firm={firm} org={org} accent={accent} initials={initials} openCount={openCount} lakelandCount={lakelandCount} total={matters.length} recent={matters.slice(0, 5)} matters={matters} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} />
               : page === "contacts"
                 ? <Contacts firmId={firm.id} />
-                : page === "calendar"
+                : page === "mytasks"
+                  ? <MyTasks onOpen={(id) => { setPage("matters"); setSelectedId(id); }} />
+                  : page === "calendar"
                   ? <Calendar onOpen={(id) => setSelectedId(id)} />
                   : page === "quotes"
                     ? <QuotesCalculator firm={firm} onEditFees={() => go("feesetup")} />
                     : page === "deadlinesetup"
                       ? <DeadlineSetup firmId={firm.id} />
+                      : page === "checklists"
+                        ? <ChecklistSetup firmId={firm.id} />
                       : page === "feesetup"
                         ? <FeeSetup firmId={firm.id} />
                         : page === "doctemplates"
@@ -472,6 +479,7 @@ function MatterDetail({ matter, firm, email, onBack, onStage, onDelete, onRefres
       <PartiesPanel matter={matter} onRefresh={onRefresh} />
 
       <DeadlinesPanel matter={matter} onRefresh={onRefresh} />
+      <TasksPanel matter={matter} />
 
       <ClientPortalPanel matter={matter} />
 
@@ -567,6 +575,185 @@ function DocumentsPanel({ matter, reloadKey, onGenerate }) {
 }
 
 /* ---------------- Deadlines panel (per matter) ---------------- */
+/* ---------------- Tasks panel (matter detail) ---------------- */
+function TasksPanel({ matter }) {
+  const [items, setItems] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [nLabel, setNLabel] = useState("");
+  const [nDate, setNDate] = useState("");
+
+  const load = async () => { setLoading(true); try { setItems(await listMatterTasks(matter.id)); } catch (e) { console.error(e); } setLoading(false); };
+  useEffect(() => { load(); (async () => { try { setMembers(await teamMembers()); } catch (e) { /* ignore */ } })(); /* eslint-disable-next-line */ }, [matter.id]);
+
+  const nameOf = (uid) => { if (!uid) return "Unassigned"; const m = members.find((x) => x.user_id === uid); return m ? (m.name || m.email) : "—"; };
+  const generate = async () => {
+    setBusy(true); setMsg("");
+    try { const r = await generateTasks(matter.firm_id, matter); await load(); setMsg(r.added ? `${r.added} task${r.added === 1 ? "" : "s"} added.` : "Nothing to add — set up a checklist in Checklists, or all items are already here."); }
+    catch (e) { setMsg(e.message || String(e)); }
+    setBusy(false);
+  };
+  const toggle = async (t) => { const done = !t.done; setItems((p) => p.map((x) => x.id === t.id ? { ...x, done } : x)); try { await updateMatterTask(t.id, { done, done_at: done ? new Date().toISOString() : null }); load(); } catch (e) { load(); } };
+  const setAssignee = async (t, uid) => { setItems((p) => p.map((x) => x.id === t.id ? { ...x, assignee_user_id: uid || null } : x)); try { await updateMatterTask(t.id, { assignee_user_id: uid || null }); } catch (e) { load(); } };
+  const editDate = async (t, v) => { setItems((p) => p.map((x) => x.id === t.id ? { ...x, due_date: v || null } : x)); try { await updateMatterTask(t.id, { due_date: v || null }); } catch (e) { load(); } };
+  const addManual = async () => { if (!nLabel.trim()) return; setBusy(true); try { await createMatterTask(matter.firm_id, matter.id, { label: nLabel.trim(), due_date: nDate || null }); setNLabel(""); setNDate(""); setAdding(false); await load(); } catch (e) { setMsg(e.message || String(e)); } setBusy(false); };
+  const remove = async (t) => { if (!window.confirm(`Delete "${t.label}"?`)) return; try { await deleteMatterTask(t.id); await load(); } catch (e) { setMsg(e.message || String(e)); } };
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const fmt = (s) => { if (!s) return ""; try { return new Date(s + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch { return s; } };
+  const overdue = (t) => t.due_date && !t.done && new Date(t.due_date + "T00:00:00") < today;
+  const inp = { border: `1px solid ${LINE}`, borderRadius: 8, padding: "7px 9px", fontSize: 13, fontFamily: "inherit", outline: "none" };
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16, maxWidth: 560 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Tasks</div>
+        <button onClick={generate} disabled={busy} style={{ padding: "7px 13px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: busy ? "default" : "pointer" }}>{busy ? "…" : "↻ Load checklist"}</button>
+      </div>
+      {msg && <div style={{ fontSize: 11.5, color: MUTED, marginBottom: 10 }}>{msg}</div>}
+      {loading ? <div style={{ fontSize: 12.5, color: "#9ca3af" }}>Loading…</div>
+        : items.length === 0 ? <div style={{ fontSize: 12.5, color: "#9ca3af", padding: "6px 0" }}>No tasks yet. Hit “Load checklist,” or add one below.</div>
+          : <div style={{ display: "flex", flexDirection: "column" }}>
+            {items.map((t) => (
+              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 0", borderTop: "1px solid #eef1f6" }}>
+                <input type="checkbox" checked={!!t.done} onChange={() => toggle(t)} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: t.done ? "#9ca3af" : NV, textDecoration: t.done ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}</div>
+                  <div style={{ fontSize: 11, color: overdue(t) ? "#dc2626" : MUTED, fontWeight: overdue(t) ? 600 : 400 }}>{t.due_date ? fmt(t.due_date) + (overdue(t) ? " · overdue" : "") : "No date"} · {nameOf(t.assignee_user_id)}</div>
+                </div>
+                <select value={t.assignee_user_id || ""} onChange={(e) => setAssignee(t, e.target.value)} title="Assignee" style={{ ...inp, padding: "4px 6px", fontSize: 11.5, maxWidth: 108 }}>
+                  <option value="">Unassigned</option>
+                  {members.map((m) => <option key={m.user_id} value={m.user_id}>{m.name || m.email}</option>)}
+                </select>
+                <input type="date" value={t.due_date || ""} onChange={(e) => editDate(t, e.target.value)} style={{ ...inp, padding: "4px 6px", fontSize: 11.5 }} />
+                <button onClick={() => remove(t)} title="Delete" style={{ padding: "5px 8px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 11.5, cursor: "pointer" }}>✕</button>
+              </div>
+            ))}
+          </div>}
+      {adding
+        ? <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <input value={nLabel} onChange={(e) => setNLabel(e.target.value)} placeholder="Task" style={{ ...inp, flex: 1, minWidth: 140 }} />
+          <input type="date" value={nDate} onChange={(e) => setNDate(e.target.value)} style={inp} />
+          <button onClick={addManual} disabled={busy || !nLabel.trim()} style={{ padding: "0 14px", background: (busy || !nLabel.trim()) ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: (busy || !nLabel.trim()) ? "default" : "pointer" }}>Add</button>
+          <button onClick={() => { setAdding(false); setNLabel(""); setNDate(""); }} style={{ padding: "0 12px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12.5, cursor: "pointer" }}>Cancel</button>
+        </div>
+        : <button onClick={() => setAdding(true)} style={{ marginTop: 12, fontSize: 12.5, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer", padding: 0 }}>＋ Add task</button>}
+    </div>
+  );
+}
+
+/* ---------------- My tasks (across matters) ---------------- */
+function MyTasks({ onOpen }) {
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const load = async () => { setLoading(true); try { setTasks(await myOpenTasks()); } catch (e) { console.error(e); } setLoading(false); };
+  useEffect(() => { load(); }, []);
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = (d) => { try { return Math.round((new Date(d + "T00:00:00").getTime() - today.getTime()) / 86400000); } catch { return null; } };
+  const complete = async (t) => { setTasks((p) => p.filter((x) => x.id !== t.id)); try { await updateMatterTask(t.id, { done: true, done_at: new Date().toISOString() }); } catch (e) { load(); } };
+  const addr = (t) => (t.matter && (t.matter.property_address || t.matter.file_number)) || "a file";
+  const fmt = (s) => { if (!s) return "No date"; try { return new Date(s + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch { return s; } };
+
+  const groups = [
+    { key: "overdue", label: "Overdue", tone: "#ef4444", items: tasks.filter((t) => t.due_date && days(t.due_date) < 0) },
+    { key: "today", label: "Today", tone: "#f59e0b", items: tasks.filter((t) => t.due_date && days(t.due_date) === 0) },
+    { key: "week", label: "This week", tone: "#f59e0b", items: tasks.filter((t) => t.due_date && days(t.due_date) >= 1 && days(t.due_date) <= 7) },
+    { key: "later", label: "Later", tone: "#94a3b8", items: tasks.filter((t) => t.due_date && days(t.due_date) > 7) },
+    { key: "nodate", label: "No date", tone: "#94a3b8", items: tasks.filter((t) => !t.due_date) }
+  ].filter((g) => g.items.length > 0);
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>My tasks</div>
+      <div style={{ color: MUTED, fontSize: 13.5, margin: "4px 0 18px" }}>Everything assigned to you across all your files.</div>
+      {loading ? <div style={{ color: "#9ca3af", fontSize: 13 }}>Loading…</div>
+        : tasks.length === 0 ? <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: "30px 18px", textAlign: "center", color: MUTED, fontSize: 13 }}>Nothing on your plate. Assign yourself tasks from any file.</div>
+          : groups.map((g) => (
+            <div key={g.key} style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "0 0 8px 2px" }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: g.tone }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: NV }}>{g.label}</span>
+                <span style={{ fontSize: 12, color: MUTED }}>{g.items.length}</span>
+              </div>
+              <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, overflow: "hidden" }}>
+                {g.items.map((t) => (
+                  <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 14px", borderTop: "1px solid #eef1f6" }}>
+                    <input type="checkbox" onChange={() => complete(t)} style={{ width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => onOpen && t.matter_id && onOpen(t.matter_id)}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: NV, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.label}</div>
+                      <div style={{ fontSize: 12, color: MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmt(t.due_date)} · {addr(t)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+    </div>
+  );
+}
+
+/* ---------------- Checklist setup (firm task templates) ---------------- */
+function ChecklistSetup({ firmId }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => { setLoading(true); try { setRows(await listTaskTemplates()); } catch (e) { console.error(e); } setLoading(false); };
+  useEffect(() => { load(); }, []);
+
+  const addRow = async () => { setBusy(true); try { await createTaskTemplate(firmId, { label: "New task", matter_type: null, anchor: null, offset_days: 0, sort_order: rows.length }); await load(); } catch (e) { alert(e.message || String(e)); } setBusy(false); };
+  const seed = async () => { setBusy(true); try { await seedDefaultTaskTemplates(firmId); await load(); } catch (e) { alert(e.message || String(e)); } setBusy(false); };
+  const patch = async (id, p) => { setRows((prev) => prev.map((r) => r.id === id ? { ...r, ...p } : r)); try { await updateTaskTemplate(id, p); } catch (e) { load(); } };
+  const remove = async (r) => { if (!window.confirm(`Remove "${r.label}"?`)) return; try { await deleteTaskTemplate(r.id); await load(); } catch (e) { alert(e.message || String(e)); } };
+
+  const inp = { border: `1px solid ${LINE}`, borderRadius: 8, padding: "7px 9px", fontSize: 13, fontFamily: "inherit", outline: "none" };
+
+  return (
+    <div style={{ maxWidth: 800 }}>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: BL, fontWeight: 600 }}>Settings</div>
+        <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Checklists</div>
+        <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Your firm's reusable task checklist. Pick a matter type (or all), and an optional due-date offset from contract or closing. Hit “Load checklist” on any file to drop these in.</div>
+      </div>
+      <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 6 }}>
+        {loading ? <div style={{ padding: 22, color: "#9ca3af", fontSize: 13 }}>Loading…</div>
+          : rows.length === 0
+            ? <div style={{ padding: "26px 18px", textAlign: "center" }}>
+              <div style={{ color: MUTED, fontSize: 13, marginBottom: 12 }}>No checklist set up yet.</div>
+              <button onClick={seed} disabled={busy} style={{ padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer", marginRight: 8 }}>Load starter checklist</button>
+              <button onClick={addRow} disabled={busy} style={{ padding: "9px 16px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ Add one</button>
+            </div>
+            : <div>
+              <div style={{ display: "flex", gap: 8, padding: "8px 12px", fontSize: 11, color: MUTED, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em" }}>
+                <div style={{ flex: 1 }}>Task</div><div style={{ width: 120 }}>Matter type</div><div style={{ width: 130 }}>Due from</div><div style={{ width: 80 }}>Offset</div><div style={{ width: 28 }} />
+              </div>
+              {rows.map((r) => (
+                <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 12px", borderTop: "1px solid #eef1f6" }}>
+                  <input value={r.label} onChange={(e) => patch(r.id, { label: e.target.value })} style={{ ...inp, flex: 1 }} />
+                  <select value={r.matter_type || ""} onChange={(e) => patch(r.id, { matter_type: e.target.value || null })} style={{ ...inp, width: 120 }}>
+                    {TASK_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                  <select value={r.anchor || ""} onChange={(e) => patch(r.id, { anchor: e.target.value || null })} style={{ ...inp, width: 130 }}>
+                    {TASK_ANCHORS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                  <input type="number" value={r.offset_days == null ? "" : r.offset_days} onChange={(e) => patch(r.id, { offset_days: e.target.value === "" ? null : parseInt(e.target.value, 10) })} disabled={!r.anchor} style={{ ...inp, width: 80, background: r.anchor ? "#fff" : "#f3f4f6" }} />
+                  <button onClick={() => remove(r)} title="Remove" style={{ padding: "6px 9px", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>✕</button>
+                </div>
+              ))}
+              <div style={{ padding: "10px 12px" }}>
+                <button onClick={addRow} disabled={busy} style={{ fontSize: 12.5, color: BL, fontWeight: 600, background: "none", border: "none", cursor: "pointer", padding: 0 }}>＋ Add task</button>
+              </div>
+            </div>}
+      </div>
+      <div style={{ fontSize: 11.5, color: MUTED, marginTop: 10 }}>“All types” applies to every file. A negative offset means before the date (e.g. Closing −7). Leave “Due from” as “No date” for tasks with no deadline.</div>
+    </div>
+  );
+}
+
 function DeadlinesPanel({ matter, onRefresh }) {
   const [contractDate, setContractDate] = useState(matter.contract_date || "");
   const [closingDate, setClosingDate] = useState(matter.closing_date || "");
