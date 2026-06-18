@@ -11,7 +11,7 @@ import {
 } from "./partnerDb.js";
 import Contacts from "./PartnerContacts.jsx";
 import EmailAssistant from "./PartnerEmailAssistant.jsx";
-import { listNotifications, markNotificationRead, markAllNotificationsRead } from "./partnerDb.js";
+import { listNotifications, markNotificationRead, markAllNotificationsRead, listOpenDeadlines } from "./partnerDb.js";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
@@ -155,7 +155,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
           {selected
             ? <MatterDetail matter={selected} firm={firm} email={email} onBack={() => setSelectedId(null)} onStage={onStage} onDelete={onDelete} onRefresh={load} onRead={loadUnreads} />
             : page === "dashboard"
-              ? <Dashboard firm={firm} org={org} accent={accent} initials={initials} openCount={openCount} lakelandCount={lakelandCount} total={matters.length} recent={matters.slice(0, 5)} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} />
+              ? <Dashboard firm={firm} org={org} accent={accent} initials={initials} openCount={openCount} lakelandCount={lakelandCount} total={matters.length} recent={matters.slice(0, 5)} matters={matters} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} />
               : page === "contacts"
                 ? <Contacts firmId={firm.id} />
                 : page === "calendar"
@@ -179,8 +179,52 @@ export default function Workspace({ ctx, email, onSignOut }) {
   );
 }
 
+/* ---------------- Needs attention (deadline watchdog) ---------------- */
+function NeedsAttention({ matters = [], onOpen }) {
+  const [deadlines, setDeadlines] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => { (async () => { try { setDeadlines(await listOpenDeadlines()); } catch (e) { /* ignore */ } setLoaded(true); })(); }, []);
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const mById = {}; matters.forEach((m) => { mById[m.id] = m; });
+  const addr = (id) => { const m = mById[id]; return m ? (m.property_address || m.file_number || "a file") : "a file"; };
+  const days = (d) => { try { return Math.round((new Date(d + "T00:00:00").getTime() - today.getTime()) / 86400000); } catch (e) { return null; } };
+
+  const overdue = deadlines.filter((d) => d.due_date && days(d.due_date) !== null && days(d.due_date) < 0);
+  const soon = deadlines.filter((d) => { const n = d.due_date && days(d.due_date); return n !== null && n >= 0 && n <= 7; });
+  const ctc = STAGES.indexOf("Clear to close");
+  const atRisk = matters.filter((m) => { const n = m.closing_date && days(m.closing_date); return n !== null && n >= 0 && n <= 7 && (m.stage || 0) < ctc; });
+
+  if (!loaded) return null;
+  if (overdue.length === 0 && soon.length === 0 && atRisk.length === 0) return null;
+
+  const Row = ({ id, label, sub, tone }) => (
+    <div onClick={() => onOpen && onOpen(id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", borderTop: "1px solid #eef1f6", cursor: "pointer" }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: tone, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: NV, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</div>
+        <div style={{ fontSize: 12, color: MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</div>
+      </div>
+    </div>
+  );
+  const cap = (arr, n) => arr.slice(0, n);
+
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, marginBottom: 18, overflow: "hidden" }}>
+      <div style={{ padding: "13px 16px", borderBottom: `1px solid ${LINE}`, display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444" }} />
+        <span style={{ fontWeight: 700, fontSize: 14, color: NV }}>Needs attention</span>
+        <span style={{ fontSize: 12, color: MUTED }}>{overdue.length + soon.length + atRisk.length} item{overdue.length + soon.length + atRisk.length === 1 ? "" : "s"}</span>
+      </div>
+      {cap(overdue, 6).map((d) => { const n = Math.abs(days(d.due_date)); return <Row key={"o" + d.id} id={d.matter_id} label={d.name} sub={`${n} day${n === 1 ? "" : "s"} overdue · ${addr(d.matter_id)}`} tone="#ef4444" />; })}
+      {cap(atRisk, 6).map((m) => { const n = days(m.closing_date); return <Row key={"r" + m.id} id={m.id} label={`Closing in ${n} day${n === 1 ? "" : "s"} — not cleared to close`} sub={addr(m.id)} tone="#f59e0b" />; })}
+      {cap(soon, 8).map((d) => { const n = days(d.due_date); return <Row key={"s" + d.id} id={d.matter_id} label={d.name} sub={`${n === 0 ? "due today" : "in " + n + " day" + (n === 1 ? "" : "s")} · ${addr(d.matter_id)}`} tone="#f59e0b" />; })}
+    </div>
+  );
+}
+
 /* ---------------- Dashboard ---------------- */
-function Dashboard({ firm, org, accent, initials, openCount, lakelandCount, total, recent, unreads = {}, onOpen, onNew }) {
+function Dashboard({ firm, org, accent, initials, openCount, lakelandCount, total, recent, matters = [], unreads = {}, onOpen, onNew }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 18, padding: 22, borderRadius: 16, color: "#fff", marginBottom: 18, background: `linear-gradient(100deg, ${shade(accent)}, ${accent})` }}>
@@ -199,6 +243,7 @@ function Dashboard({ firm, org, accent, initials, openCount, lakelandCount, tota
           </div>
         ))}
       </div>
+      <NeedsAttention matters={matters} onOpen={onOpen} />
       <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14 }}>
         <div style={{ padding: "14px 18px", fontWeight: 600, fontSize: 14.5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           Recent matters

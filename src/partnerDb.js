@@ -467,3 +467,12 @@ export async function markAllNotificationsRead() {
   const { error } = await supabase.from("notifications").update({ read_at: new Date().toISOString() }).is("read_at", null);
   if (error) throw error;
 }
+
+/* ---------------- Open deadlines (for dashboard risk panel) ---------------- */
+export async function listOpenDeadlines() {
+  const { data, error } = await supabase.from("matter_deadlines")
+    .select("id, matter_id, name, due_date, done")
+    .eq("done", false).order("due_date", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
