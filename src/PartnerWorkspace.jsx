@@ -23,6 +23,7 @@ import { createClientLink, listClientLinks, revokeClientLink, setDocumentClientV
 import Reports from "./PartnerReports.jsx";
 import Invoices from "./PartnerInvoices.jsx";
 import { MatterNotesPanel, MatterInvoicesPanel } from "./MatterPanels.jsx";
+import { MatterEsignPanel } from "./EsignPanel.jsx";
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0", FIRM_DEFAULT = "#0f5132";
 
@@ -531,6 +532,8 @@ function MatterDetail({ matter, firm, email, onBack, onStage, onDelete, onArchiv
       {matter.saved_quote && <SavedQuotePanel quote={matter.saved_quote} />}
 
       <MatterInvoicesPanel matter={matter} firm={firm} />
+
+      <MatterEsignPanel matter={matter} firm={firm} />
 
       <ClientPortalPanel matter={matter} />
 
