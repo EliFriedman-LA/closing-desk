@@ -20,6 +20,9 @@ import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultF
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
 import { DOC_TOKENS, TOKEN_LABELS, buildMergeData, generateDocs, downloadBlob } from "./partnerDocs.js";
 import { createClientLink, listClientLinks, revokeClientLink, setDocumentClientVisible, listClientMessages, sendClientMessageAsFirm, markClientMessagesRead, extractContract } from "./partnerDb.js";
+import Reports from "./PartnerReports.jsx";
+import Invoices from "./PartnerInvoices.jsx";
+import { MatterNotesPanel, MatterInvoicesPanel } from "./MatterPanels.jsx";
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0", FIRM_DEFAULT = "#0f5132";
 
@@ -155,6 +158,8 @@ export default function Workspace({ ctx, email, onSignOut }) {
           {navItem("feesetup", "Quote fees", "◇")}
           {navItem("doctemplates", "Doc templates", "❏")}
           {navItem("emailassistant", "Email assistant", "✉")}
+          {navItem("invoices", "Invoices", "＄")}
+          {navItem("reports", "Reports", "◳")}
           {navItem("team", "Team", "◑")}
         </nav>
         <div style={{ margin: "10px 12px 14px", padding: "11px 12px", background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 11, display: "flex", alignItems: "center", gap: 10 }}>
@@ -204,7 +209,7 @@ export default function Workspace({ ctx, email, onSignOut }) {
                             ? <EmailAssistant firmId={firm.id} />
                             : page === "team"
                               ? <Team firm={firm} myRole={myRole} myEmail={email} logoUrl={logoUrl} onLogoChange={setLogoUrl} />
-                              : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} showArchived={showArchived} onToggleArchived={() => setShowArchived((s) => !s)} archivedCount={archivedCount} />}
+                              : page === "invoices" ? <Invoices firm={firm} matters={matters} /> : page === "reports" ? <Reports /> : <MattersList loading={loading} matters={filtered} total={matters.length} unreads={unreads} onOpen={(id) => setSelectedId(id)} onNew={() => setShowNew(true)} query={query} showArchived={showArchived} onToggleArchived={() => setShowArchived((s) => !s)} archivedCount={archivedCount} />}
         </main>
       </div>
 
@@ -522,7 +527,10 @@ function MatterDetail({ matter, firm, email, onBack, onStage, onDelete, onArchiv
       <DeadlinesPanel matter={matter} onRefresh={onRefresh} />
       <TasksPanel matter={matter} />
       <AIPanel matter={matter} firm={firm} />
+      <MatterNotesPanel matter={matter} />
       {matter.saved_quote && <SavedQuotePanel quote={matter.saved_quote} />}
+
+      <MatterInvoicesPanel matter={matter} firm={firm} />
 
       <ClientPortalPanel matter={matter} />
 
@@ -580,6 +588,10 @@ function DocumentsPanel({ matter, reloadKey, onGenerate }) {
 
   const fmtSize = (n) => !n ? "" : n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(0) + " KB" : (n / 1048576).toFixed(1) + " MB";
   const fmtDate = (s) => { try { return new Date(s).toLocaleDateString(); } catch { return ""; } };
+  const verMap = {};
+  docs.forEach((d) => { (verMap[d.name] = verMap[d.name] || []).push(d); });
+  Object.values(verMap).forEach((arr) => arr.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
+  const verLabel = (d) => { const arr = verMap[d.name] || []; if (arr.length < 2) return ""; const i = arr.findIndex((x) => x.id === d.id); return `v${i + 1}/${arr.length}`; };
 
   return (
     <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginTop: 16, maxWidth: 560 }}>
@@ -604,7 +616,7 @@ function DocumentsPanel({ matter, reloadKey, onGenerate }) {
               <div style={{ fontSize: 18, flexShrink: 0 }}>📄</div>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div onClick={() => open(d)} style={{ fontSize: 13, fontWeight: 600, color: NV, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
-                <div style={{ fontSize: 11, color: MUTED }}>{[fmtSize(d.size), fmtDate(d.created_at)].filter(Boolean).join(" · ")}</div>
+                <div style={{ fontSize: 11, color: MUTED }}>{[fmtSize(d.size), fmtDate(d.created_at), verLabel(d)].filter(Boolean).join(" · ")}</div>
               </div>
               <span style={d.uploaded_by_client ? tag("#fef3c7", "#92400e") : d.side === "lakeland" ? tag("#e8f3ff", "#0f6fd1") : tag("#f1f5f9", "#475569")}>{d.uploaded_by_client ? "Client" : d.side === "lakeland" ? "Lakeland" : "You"}</span>
               <button onClick={() => toggleShare(d)} title="Show in the client portal" style={{ padding: "5px 10px", background: d.client_visible ? "#ecfdf5" : "#fff", border: `1px solid ${d.client_visible ? "#a7f3d0" : LINE}`, color: d.client_visible ? "#065f46" : MUTED, borderRadius: 6, fontSize: 11.5, fontWeight: 600, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>{d.client_visible ? "Shared ✓" : "Share"}</button>

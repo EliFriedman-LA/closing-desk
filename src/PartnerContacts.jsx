@@ -3,6 +3,28 @@ import { listContacts, createContact, updateContact, deleteContact, CONTACT_ROLE
 
 const NV = "#1e3a5f", BL = "#1B91FE", MUTED = "#64748b", LINE = "#e6eaf0";
 
+const telHref = (p) => "tel:" + String(p || "").replace(/[^\d+]/g, "");
+const smsHref = (p) => "sms:" + String(p || "").replace(/[^\d+]/g, "");
+const mailHref = (e) => "mailto:" + String(e || "").trim();
+
+function QuickActions({ contact, size = "sm", onClick }) {
+  const stop = (e) => { e.stopPropagation(); onClick && onClick(); };
+  const dim = size === "lg" ? 38 : 30;
+  const btn = (label, href, title) => (
+    <a href={href} onClick={stop} title={title} style={{
+      width: dim, height: dim, borderRadius: 8, border: `1px solid ${LINE}`, background: "#fff",
+      display: "grid", placeItems: "center", textDecoration: "none", color: NV, fontSize: size === "lg" ? 16 : 14, flexShrink: 0
+    }}>{label}</a>
+  );
+  return (
+    <div style={{ display: "flex", gap: 6 }}>
+      {contact.phone ? btn("✆", telHref(contact.phone), "Call") : null}
+      {contact.phone ? btn("✉", smsHref(contact.phone), "Text") : null}
+      {contact.email ? btn("@", mailHref(contact.email), "Email") : null}
+    </div>
+  );
+}
+
 export default function Contacts({ firmId }) {
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -60,10 +82,11 @@ export default function Contacts({ firmId }) {
             {filtered.map((c) => (
               <div key={c.id} onClick={() => setEditing(c)} style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 13, cursor: "pointer" }}>
                 <div style={{ width: 40, height: 40, borderRadius: 10, background: "#eef2f8", color: NV, display: "grid", placeItems: "center", fontWeight: 600, flexShrink: 0 }}>{initials(c.name)}</div>
-                <div style={{ minWidth: 0 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: 13.5 }}>{c.name}</div>
                   <div style={{ fontSize: 12, color: MUTED, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[c.role, c.firm_name].filter(Boolean).join(" · ") || c.email || c.phone || "—"}</div>
                 </div>
+                {(c.phone || c.email) && <QuickActions contact={c} />}
               </div>
             ))}
           </div>}
@@ -107,6 +130,11 @@ function ContactModal({ contact, onClose, onSave, onDelete }) {
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, color: "#9ca3af", cursor: "pointer" }}>×</button>
         </div>
         <div style={{ padding: 22 }}>
+          {!isNew && (contact.phone || contact.email) && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+              <QuickActions contact={contact} size="lg" />
+            </div>
+          )}
           <label style={lbl}>Name</label>
           <input style={inp} value={f.name} onChange={(e) => u("name", e.target.value)} placeholder="Full name" autoFocus />
           <div style={{ display: "flex", gap: 10 }}>
