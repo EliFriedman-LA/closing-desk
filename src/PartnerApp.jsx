@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { supabase } from "./partnerClient.js";
+import { supabase, changePassword } from "./partnerClient.js";
 import Login from "./PartnerLogin.jsx";
 import Workspace from "./PartnerWorkspace.jsx";
 import Accept from "./PartnerAccept.jsx";
@@ -7,13 +7,14 @@ import OnboardingWizard from "./PartnerOnboarding.jsx";
 
 // Auth + firm-context gate.
 //   loading   → checking session
-//   signedout → no session; show Login (magic link)
+//   signedout → no session; show Login (Company ID + User ID + password, or email link)
 //   nofirm    → signed in, but not linked to a firm yet (no invite accepted)
 //   ready     → signed in and linked to a firm; show the workspace
 export default function App() {
   const [status, setStatus] = useState("loading");
   const [session, setSession] = useState(null);
-  const [ctx, setCtx] = useState(null); // { role, firm, org }
+  const [ctx, setCtx] = useState(null); // { role, firm, org, mustChange }
+
   // An invite token arrives in the URL (?token=…). Persist it so it survives the
   // magic-link round-trip, then the Accept flow redeems it.
   const [inviteToken] = useState(() => {
@@ -30,12 +31,12 @@ export default function App() {
     try {
       const { data, error } = await supabase
         .from("firm_users")
-        .select("role, firm:firms(*, org:orgs(*))")
+        .select("role, must_change_password, firm:firms(*, org:orgs(*))")
         .eq("user_id", sess.user.id)
         .maybeSingle();
       if (error) throw error;
       if (data && data.firm) {
-        setCtx({ role: data.role, firm: data.firm, org: data.firm.org });
+        setCtx({ role: data.role, firm: data.firm, org: data.firm.org, mustChange: !!data.must_change_password });
         setStatus("ready");
       } else {
         setCtx(null);
@@ -105,9 +106,85 @@ export default function App() {
     );
   }
 
+  if (ctx && ctx.mustChange) {
+    return (
+      <ForcePasswordChange
+        onDone={() => { setStatus("loading"); loadContext(session); }}
+        onSignOut={signOut}
+      />
+    );
+  }
+
   if (ctx && !ctx.firm?.onboarded_at) {
     return <OnboardingWizard firm={ctx.firm} onDone={() => { setStatus("loading"); loadContext(session); }} />;
   }
 
   return <Workspace ctx={ctx} email={session?.user?.email} onSignOut={signOut} />;
+}
+
+// Forced password change on first sign-in for owner-created / backfilled users.
+function ForcePasswordChange({ onDone, onSignOut }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async () => {
+    setErr("");
+    if (pw.length < 8) { setErr("Use at least 8 characters."); return; }
+    if (pw !== pw2) { setErr("Passwords don't match."); return; }
+    setBusy(true);
+    try {
+      await changePassword(pw);
+      onDone();
+    } catch (e) {
+      setErr(e.message || "Could not update password.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="login">
+      <div className="login-card">
+        <div className="brand-row">
+          <div className="brand-mark">C</div>
+          <div>
+            <div className="brand-name">Closing Desk</div>
+            <div className="brand-sub">Powered by Lakeland</div>
+          </div>
+        </div>
+        <h2 className="serif login-title">Set your password</h2>
+        <p className="muted">Choose a new password to finish setting up your account.</p>
+
+        <label className="field-label">New password</label>
+        <input
+          className="input"
+          type="password"
+          autoComplete="new-password"
+          value={pw}
+          onChange={(e) => setPw(e.target.value)}
+          autoFocus
+        />
+
+        <label className="field-label" style={{ marginTop: 12 }}>Confirm password</label>
+        <input
+          className="input"
+          type="password"
+          autoComplete="new-password"
+          value={pw2}
+          onChange={(e) => setPw2(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+        />
+
+        {err && <div className="err">{err}</div>}
+
+        <button className="btn primary full" onClick={submit} disabled={busy}>
+          {busy ? "Saving…" : "Set password & continue"}
+        </button>
+        <button className="btn ghost" style={{ width: "100%", marginTop: 10 }} onClick={onSignOut}>
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
 }

@@ -17,3 +17,31 @@ export const supabase = createClient(url, anon, {
     detectSessionInUrl: true
   }
 });
+
+// --------------------------------------------------------------------------
+// Credential login (Company ID + User ID + password).
+// The server resolves the credentials to the underlying auth email and returns
+// a session, which we adopt so onAuthStateChange in PartnerApp takes over.
+// --------------------------------------------------------------------------
+export async function signInWithCredentials(companyCode, username, password) {
+  const r = await fetch("/api/partner-auth", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ company_code: companyCode, username, password }),
+  });
+  const d = await r.json().catch(() => ({ ok: false, error: "Sign-in failed" }));
+  if (!r.ok || !d.ok) throw new Error(d.error || "Sign-in failed");
+  const { error } = await supabase.auth.setSession({
+    access_token: d.access_token,
+    refresh_token: d.refresh_token,
+  });
+  if (error) throw error;
+  return { mustChangePassword: !!d.must_change_password };
+}
+
+// Set a new password for the signed-in user, then clear the forced-change flag.
+export async function changePassword(newPassword) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+  await supabase.rpc("partner_clear_pw_flag");
+}
