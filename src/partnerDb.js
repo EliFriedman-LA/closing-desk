@@ -635,3 +635,35 @@ export async function removeFirmLogo() {
   const { error } = await supabase.rpc("set_firm_logo", { p_url: null });
   if (error) throw error;
 }
+
+/* ---------------- Team logins (credential-based, Chunk 2) ---------------- */
+async function _accessToken() {
+  const { data } = await supabase.auth.getSession();
+  return data && data.session ? data.session.access_token : null;
+}
+
+// Firm manager creates a teammate's login. Returns { username, temp_password, company_code }.
+export async function teamCreateLogin({ username, role, display_name, password }) {
+  const token = await _accessToken();
+  const r = await fetch("/api/partner-team", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action: "create-user", username, role, display_name, password }),
+  });
+  const d = await r.json().catch(() => ({ ok: false, error: "Request failed" }));
+  if (!r.ok || !d.ok) throw new Error(d.error || "Could not create the login.");
+  return d;
+}
+
+// Firm manager resets a teammate's password. Returns { username, temp_password }.
+export async function teamResetPasswordLogin(userId, password) {
+  const token = await _accessToken();
+  const r = await fetch("/api/partner-team", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action: "reset-password", user_id: userId, password }),
+  });
+  const d = await r.json().catch(() => ({ ok: false, error: "Request failed" }));
+  if (!r.ok || !d.ok) throw new Error(d.error || "Could not reset the password.");
+  return d;
+}

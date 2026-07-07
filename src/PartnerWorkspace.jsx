@@ -12,7 +12,7 @@ import {
 import Contacts from "./PartnerContacts.jsx";
 import EmailAssistant from "./PartnerEmailAssistant.jsx";
 import { listNotifications, markNotificationRead, markNotificationsRead, myReadNotificationIds, listOpenDeadlines } from "./partnerDb.js";
-import { teamMembers, teamPendingInvites, teamInvite, teamSetRole, teamRemove, teamRevokeInvite } from "./partnerDb.js";
+import { teamMembers, teamPendingInvites, teamInvite, teamSetRole, teamRemove, teamRevokeInvite, teamCreateLogin, teamResetPasswordLogin } from "./partnerDb.js";
 import { TASK_ANCHORS, TASK_TYPES, listTaskTemplates, createTaskTemplate, updateTaskTemplate, deleteTaskTemplate, seedDefaultTaskTemplates, listMatterTasks, createMatterTask, updateMatterTask, deleteMatterTask, generateTasks, myOpenTasks } from "./partnerDb.js";
 import { aiAssist, setMatterArchived, saveMatterQuote, uploadFirmLogo, removeFirmLogo } from "./partnerDb.js";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
@@ -2098,6 +2098,11 @@ function Team({ firm, myRole, myEmail, logoUrl, onLogoChange }) {
   const [copied, setCopied] = useState("");
   const [logoBusy, setLogoBusy] = useState(false);
   const logoRef = useRef(null);
+  // Credential-based teammate creation (no email invites).
+  const [newName, setNewName] = useState("");
+  const [newUser, setNewUser] = useState("");
+  const [newCreds, setNewCreds] = useState(null); // { username, temp_password, company_code }
+  const [resetCreds, setResetCreds] = useState(null); // { username, temp_password }
 
   const onLogoFile = async (file) => {
     if (!file) return;
@@ -2128,14 +2133,27 @@ function Team({ firm, myRole, myEmail, logoUrl, onLogoChange }) {
   const linkFor = (token) => `${window.location.origin}/accept?token=${encodeURIComponent(token)}`;
   const copy = (text, id) => { try { navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(""), 1600); } catch (e) { /* ignore */ } };
 
-  const invite = async () => {
+  const createLogin = async () => {
     setErr("");
-    const e = email.trim();
-    if (!e) { setErr("Enter an email."); return; }
+    setNewCreds(null);
+    const u = newUser.trim();
+    if (!u) { setErr("Enter a User ID."); return; }
+    if (!/^[a-zA-Z0-9._-]{2,40}$/.test(u)) { setErr("User ID: 2–40 letters, numbers, dot, dash or underscore."); return; }
     setBusy(true);
-    try { await teamInvite(e, role); setEmail(""); setRole("paralegal"); await load(); }
-    catch (ex) { setErr(ex.message || String(ex)); }
+    try {
+      const d = await teamCreateLogin({ username: u, role, display_name: newName.trim() });
+      setNewCreds(d);
+      setNewUser(""); setNewName(""); setRole("paralegal");
+      await load();
+    } catch (ex) { setErr(ex.message || String(ex)); }
     setBusy(false);
+  };
+  const resetPassword = async (m) => {
+    if (!window.confirm(`Reset the password for ${m.name || m.email}? They'll set a new one at next sign-in.`)) return;
+    try {
+      const d = await teamResetPasswordLogin(m.user_id);
+      setResetCreds(d);
+    } catch (e) { alert(e.message || String(e)); }
   };
   const changeRole = async (m, r) => { try { await teamSetRole(m.user_id, r); await load(); } catch (e) { alert(e.message || String(e)); } };
   const remove = async (m) => { if (!window.confirm(`Remove ${m.email || m.name} from the team?`)) return; try { await teamRemove(m.user_id); await load(); } catch (e) { alert(e.message || String(e)); } };
@@ -2163,18 +2181,58 @@ function Team({ firm, myRole, myEmail, logoUrl, onLogoChange }) {
         </div>
       )}
 
+      {manager && firm.company_code && (
+        <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginBottom: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: NV, marginBottom: 4 }}>Your Company ID</div>
+          <div style={{ fontSize: 12, color: MUTED, marginBottom: 10 }}>Everyone at your firm uses this with their own User ID and password to sign in.</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 16, fontWeight: 700, color: NV, letterSpacing: ".04em" }}>{firm.company_code}</span>
+            <button onClick={() => copy(firm.company_code, "cc")} style={{ padding: "6px 12px", background: "#fff", color: BL, border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{copied === "cc" ? "Copied ✓" : "Copy"}</button>
+          </div>
+        </div>
+      )}
+
       {manager && (
         <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 18, marginBottom: 16 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: NV, marginBottom: 10 }}>Invite a teammate</div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: NV, marginBottom: 10 }}>Add a teammate</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="their work email" type="email" style={{ flex: "2 1 220px", padding: "9px 11px", border: `1px solid ${LINE}`, borderRadius: 9, fontSize: 13.5, background: "#f8fafc" }} />
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Full name (optional)" style={{ flex: "2 1 200px", padding: "9px 11px", border: `1px solid ${LINE}`, borderRadius: 9, fontSize: 13.5, background: "#f8fafc" }} />
+            <input value={newUser} onChange={(e) => setNewUser(e.target.value)} placeholder="User ID (e.g. jsmith)" autoCapitalize="none" style={{ flex: "2 1 180px", padding: "9px 11px", border: `1px solid ${LINE}`, borderRadius: 9, fontSize: 13.5, background: "#f8fafc" }} />
             <select value={role} onChange={(e) => setRole(e.target.value)} style={{ flex: "1 1 130px", padding: "9px 11px", border: `1px solid ${LINE}`, borderRadius: 9, fontSize: 13.5, background: "#fff", textTransform: "capitalize" }}>
               {ROLE_OPTS.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
-            <button onClick={invite} disabled={busy} style={{ padding: "9px 18px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: busy ? "default" : "pointer" }}>{busy ? "Working…" : "Send invite"}</button>
+            <button onClick={createLogin} disabled={busy} style={{ padding: "9px 18px", background: busy ? "#9ca3af" : BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: busy ? "default" : "pointer" }}>{busy ? "Working…" : "Create login"}</button>
           </div>
           {err && <div style={{ color: "#dc2626", fontSize: 12.5, marginTop: 8 }}>{err}</div>}
-          <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>Creates an invite link. They sign in with that exact email to join your firm.</div>
+          <div style={{ fontSize: 12, color: MUTED, marginTop: 8 }}>Creates a User ID + temporary password. Hand these to your teammate — they'll set their own password at first sign-in.</div>
+
+          {newCreds && (
+            <div style={{ marginTop: 14, background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10, padding: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: NV, marginBottom: 8 }}>New login — shown once</div>
+              <div style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 13, color: "#0f2942", lineHeight: 1.7 }}>
+                Company ID: <b>{newCreds.company_code || firm.company_code}</b><br />
+                User ID: <b>{newCreds.username}</b><br />
+                Temp password: <b>{newCreds.temp_password}</b>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button onClick={() => copy(`Company ID: ${newCreds.company_code || firm.company_code}\nUser ID: ${newCreds.username}\nTemporary password: ${newCreds.temp_password}\n${window.location.origin}`, "newc")} style={{ padding: "6px 12px", background: "#fff", color: BL, border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{copied === "newc" ? "Copied ✓" : "Copy all"}</button>
+                <button onClick={() => setNewCreds(null)} style={{ background: "none", border: "none", color: MUTED, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
+              </div>
+            </div>
+          )}
+          {resetCreds && (
+            <div style={{ marginTop: 14, background: "#fefce8", border: "1px solid #fde68a", borderRadius: 10, padding: 14 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: NV, marginBottom: 8 }}>Password reset for {resetCreds.username} — shown once</div>
+              <div style={{ fontFamily: "ui-monospace,Menlo,monospace", fontSize: 13, color: "#0f2942", lineHeight: 1.7 }}>
+                User ID: <b>{resetCreds.username}</b><br />
+                Temp password: <b>{resetCreds.temp_password}</b>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button onClick={() => copy(`User ID: ${resetCreds.username}\nTemporary password: ${resetCreds.temp_password}`, "resc")} style={{ padding: "6px 12px", background: "#fff", color: BL, border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{copied === "resc" ? "Copied ✓" : "Copy"}</button>
+                <button onClick={() => setResetCreds(null)} style={{ background: "none", border: "none", color: MUTED, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -2184,18 +2242,21 @@ function Team({ firm, myRole, myEmail, logoUrl, onLogoChange }) {
           : members.length === 0 ? <div style={{ padding: 18, color: MUTED, fontSize: 13 }}>No members yet.</div>
             : members.map((m) => {
               const isMe = (m.email || "").toLowerCase() === (myEmail || "").toLowerCase();
+              const synthetic = (m.email || "").endsWith("@team.closingdesk.app");
+              const primary = m.name || (synthetic ? "Team member" : m.email);
               return (
                 <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderTop: "1px solid #eef1f6" }}>
-                  <div style={{ width: 34, height: 34, borderRadius: 8, background: "#eef4fb", color: NV, display: "grid", placeItems: "center", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>{((m.name || m.email || "?")[0] || "?").toUpperCase()}</div>
+                  <div style={{ width: 34, height: 34, borderRadius: 8, background: "#eef4fb", color: NV, display: "grid", placeItems: "center", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>{((primary || "?")[0] || "?").toUpperCase()}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: NV }}>{m.name || m.email}{isMe && <span style={{ fontSize: 11, color: MUTED, fontWeight: 500 }}> · you</span>}</div>
-                    {m.name && <div style={{ fontSize: 12, color: MUTED }}>{m.email}</div>}
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: NV }}>{primary}{isMe && <span style={{ fontSize: 11, color: MUTED, fontWeight: 500 }}> · you</span>}</div>
+                    {m.name && !synthetic && <div style={{ fontSize: 12, color: MUTED }}>{m.email}</div>}
                   </div>
                   {manager && !isMe
                     ? <select value={m.role} onChange={(e) => changeRole(m, e.target.value)} style={{ padding: "6px 9px", border: `1px solid ${LINE}`, borderRadius: 8, fontSize: 12.5, background: "#fff", textTransform: "capitalize" }}>
                         {ROLE_OPTS.map((r) => <option key={r} value={r}>{r}</option>)}
                       </select>
                     : <Badge r={m.role} />}
+                  {manager && !isMe && <button onClick={() => resetPassword(m)} style={{ background: "none", border: "none", color: BL, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Reset password</button>}
                   {manager && !isMe && <button onClick={() => remove(m)} style={{ background: "none", border: "none", color: "#b91c1c", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Remove</button>}
                 </div>
               );
