@@ -18,7 +18,7 @@ import { aiAssist, setMatterArchived, saveMatterQuote, uploadFirmLogo, removeFir
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
 import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
-import { DOC_TOKENS, TOKEN_LABELS, buildMergeData, generateDocs, downloadBlob } from "./partnerDocs.js";
+import { DOC_TOKENS, TOKEN_LABELS, buildMergeData, generateDocs, downloadBlob, docxFileToText } from "./partnerDocs.js";
 import { createClientLink, listClientLinks, revokeClientLink, setDocumentClientVisible, listClientMessages, sendClientMessageAsFirm, markClientMessagesRead, extractContract } from "./partnerDb.js";
 import Reports from "./PartnerReports.jsx";
 import Invoices from "./PartnerInvoices.jsx";
@@ -1375,16 +1375,24 @@ function DocTemplates({ firmId }) {
     } catch (e) { alert(e.message || String(e)); }
     setBusy(false);
   };
-  const onUpload = async (e) => {
+  const onConvert = async (e) => {
     const file = e.target.files && e.target.files[0];
     if (fileRef.current) fileRef.current.value = "";
     if (!file) return;
     if (!/\.docx$/i.test(file.name)) { alert("Please upload a Word .docx file."); return; }
     setBusy(true);
     try {
-      const path = await uploadDocTemplateFile(firmId, file);
-      await createDocTemplate(firmId, { name: file.name.replace(/\.docx$/i, ""), source_type: "docx", storage_path: path, sort_order: rows.length });
-      await load();
+      const text = await docxFileToText(file);
+      if (!text.trim()) throw new Error("Couldn't read any text from that Word document.");
+      const r = await fetch("/api/extract-template-fields", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, tokens: DOC_TOKENS }),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || "Conversion failed.");
+      const body = (j.data && j.data.body) || text;
+      const t = await createDocTemplate(firmId, { name: file.name.replace(/\.docx$/i, ""), source_type: "editor", body, sort_order: rows.length });
+      await load(); setEditing(t);
     } catch (e) { alert(e.message || String(e)); }
     setBusy(false);
   };
@@ -1396,7 +1404,7 @@ function DocTemplates({ firmId }) {
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: BL, fontWeight: 600 }}>Settings</div>
         <div style={{ fontFamily: "Fraunces,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.1 }}>Doc templates</div>
-        <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Your firm's own templates. Write one here with merge fields, or upload a Word file with the same fields. You'll generate filled documents from any matter (coming next).</div>
+        <div style={{ color: MUTED, fontSize: 13.5, marginTop: 4 }}>Your firm's own templates. Write one here with merge fields, or drop in a Word file and we'll turn it into a fillable template automatically. You'll generate filled documents from any matter (coming next).</div>
       </div>
 
       <div style={{ background: "#f8fafc", border: `1px solid ${LINE}`, borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
@@ -1410,8 +1418,8 @@ function DocTemplates({ firmId }) {
 
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
         <button onClick={newEditor} disabled={busy} style={{ padding: "9px 16px", background: BL, color: "#fff", border: "none", borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>＋ New editor template</button>
-        <button onClick={() => fileRef.current && fileRef.current.click()} disabled={busy} style={{ padding: "9px 16px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: "pointer", color: NV }}>⤓ Upload .docx</button>
-        <input ref={fileRef} type="file" accept=".docx" onChange={onUpload} style={{ display: "none" }} />
+        <button onClick={() => fileRef.current && fileRef.current.click()} disabled={busy} style={{ padding: "9px 16px", background: "#fff", border: `1px solid ${LINE}`, borderRadius: 9, fontWeight: 600, fontSize: 13, cursor: busy ? "default" : "pointer", color: NV }}>{busy ? "Converting…" : "✨ Convert a Word doc"}</button>
+        <input ref={fileRef} type="file" accept=".docx" onChange={onConvert} style={{ display: "none" }} />
       </div>
 
       <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 14, padding: 6 }}>

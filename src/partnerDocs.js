@@ -208,6 +208,14 @@ export async function generateDocs(opts) {
   return { files };
 }
 
+// Extract the plain text of a .docx File/Blob. Used by the "Convert a Word doc"
+// flow to turn an existing form into a fillable editor template.
+export async function docxFileToText(file) {
+  const ab = await file.arrayBuffer();
+  const res = await mammoth.extractRawText({ arrayBuffer: ab });
+  return (res && res.value) || "";
+}
+
 // Trigger a browser download of a blob.
 export function downloadBlob(blob, name) {
   const url = URL.createObjectURL(blob);
