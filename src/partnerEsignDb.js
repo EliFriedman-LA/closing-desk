@@ -10,7 +10,12 @@ function genToken() {
     const b = crypto.randomUUID();
     return (a + b).replace(/-/g, "");
   } catch (e) {
-    return (Math.random().toString(36) + Math.random().toString(36) + Date.now().toString(36)).replace(/\./g, "");
+    // crypto.randomUUID is missing only on very old browsers or an insecure
+    // origin. Stay on the crypto RNG rather than falling back to Math.random,
+    // which is predictable and must never generate a signing token.
+    const a = new Uint8Array(32);
+    crypto.getRandomValues(a);
+    return Array.from(a, (n) => n.toString(16).padStart(2, "0")).join("");
   }
 }
 
