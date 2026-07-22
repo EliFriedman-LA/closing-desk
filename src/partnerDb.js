@@ -414,18 +414,34 @@ export async function markClientMessagesRead(matterId) {
   if (error) throw error;
 }
 
-/* ---------------- Contract import (Phase 5.1) ---------------- */
-// POST a contract PDF (base64) or pasted text to the extractor; returns the matter fields.
-export async function extractContract(payload) {
-  const r = await fetch("/api/extract-contract", {
+/* ---------------- AI endpoints ---------------- */
+// These run on our Anthropic key, so the server now requires a signed-in
+// session. One helper attaches the token so every call site can't drift.
+async function postAiJson(url, payload, failMsg) {
+  const token = await _accessToken();
+  if (!token) throw new Error("Your session has expired — sign in again.");
+  const r = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload)
   });
   let j = {};
   try { j = await r.json(); } catch (e) { /* non-JSON */ }
-  if (!r.ok || !j.ok) throw new Error(j.error || `Extraction failed (${r.status})`);
+  if (!r.ok || !j.ok) throw new Error(j.error || `${failMsg} (${r.status})`);
+  return j;
+}
+
+/* ---------------- Contract import (Phase 5.1) ---------------- */
+// POST a contract PDF (base64) or pasted text to the extractor; returns the matter fields.
+export async function extractContract(payload) {
+  const j = await postAiJson("/api/extract-contract", payload, "Extraction failed");
   return j.data;
+}
+
+// Reads a .docx template's merge fields. Called from the workspace UI.
+export async function extractTemplateFields(payload) {
+  const j = await postAiJson("/api/extract-template-fields", payload, "Could not read that template");
+  return j;
 }
 
 /* ---------------- Email Assistant questionnaire ---------------- */
@@ -597,10 +613,8 @@ export async function myOpenTasks() {
 
 /* ---------------- AI assist (Phase A1) ---------------- */
 export async function aiAssist(payload) {
-  const r = await fetch("/api/ai-assist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-  const data = await r.json().catch(() => ({}));
-  if (!data || !data.ok) throw new Error((data && data.error) || "AI request failed");
-  return data.result;
+  const j = await postAiJson("/api/ai-assist", payload, "AI request failed");
+  return j.result;
 }
 
 /* ---------------- Archive (Phase R1) ---------------- */

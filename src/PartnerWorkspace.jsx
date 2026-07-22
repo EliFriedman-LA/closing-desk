@@ -17,7 +17,7 @@ import { TASK_ANCHORS, TASK_TYPES, listTaskTemplates, createTaskTemplate, update
 import { aiAssist, setMatterArchived, saveMatterQuote, uploadFirmLogo, removeFirmLogo } from "./partnerDb.js";
 import { STATE_RATES, quotePremium, calcRTF, calcGPF, SIMPLE_EXEMPTION_OPTIONS, PROPERTY_CLASS_OPTIONS, money } from "./partnerRates.js";
 import { listFeeLines, createFeeLine, updateFeeLine, deleteFeeLine, seedDefaultFees } from "./partnerDb.js";
-import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile } from "./partnerDb.js";
+import { listDocTemplates, createDocTemplate, updateDocTemplate, deleteDocTemplate, uploadDocTemplateFile, downloadDocTemplateFile, extractTemplateFields } from "./partnerDb.js";
 import { DOC_TOKENS, TOKEN_LABELS, buildMergeData, generateDocs, downloadBlob, docxFileToText } from "./partnerDocs.js";
 import { createClientLink, listClientLinks, revokeClientLink, setDocumentClientVisible, listClientMessages, sendClientMessageAsFirm, markClientMessagesRead, extractContract } from "./partnerDb.js";
 import Reports from "./PartnerReports.jsx";
@@ -1384,12 +1384,7 @@ function DocTemplates({ firmId }) {
     try {
       const text = await docxFileToText(file);
       if (!text.trim()) throw new Error("Couldn't read any text from that Word document.");
-      const r = await fetch("/api/extract-template-fields", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, tokens: DOC_TOKENS }),
-      });
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.error || "Conversion failed.");
+      const j = await extractTemplateFields({ text, tokens: DOC_TOKENS });
       const body = (j.data && j.data.body) || text;
       const t = await createDocTemplate(firmId, { name: file.name.replace(/\.docx$/i, ""), source_type: "editor", body, sort_order: rows.length });
       await load(); setEditing(t);

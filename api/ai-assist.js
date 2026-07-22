@@ -70,12 +70,10 @@ function letterContext(ctx) {
   return `Draft the attorney-review letter from the matter details below.\n\n${lines.join("\n")}`;
 }
 
+import { rejectUnlessSignedIn } from "./_session.js";
+
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Method not allowed" });
+  if (await rejectUnlessSignedIn(req, res)) return;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ ok: false, error: "ANTHROPIC_API_KEY is not set in Vercel → Settings → Environment Variables." });
